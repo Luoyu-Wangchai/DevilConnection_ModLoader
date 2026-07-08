@@ -1,13 +1,7 @@
-# Node dependencies
-node_modules/
-
 # .NET build output
 bin/
 obj/
 publish/
-
-# Installer embedded payload (build artifact - rebuild via build/build_payload.ps1)
-installer/Assets/runtime.zip
 
 # Secrets / RSA keys
 .env
