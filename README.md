@@ -1,43 +1,50 @@
 # DevilConnection_ModLoader  
 **《でびるコネクショん》（恶魔连结）通用模组加载器**
 
-本项目是基于 [ShiroNeko 原始版本](https://steamcommunity.com/app/3054820/discussions/0/671726388306530312/) 的深度重构与增强版。
+本项目是基于 [逍婉瑶改](https://github.com/shouennyou/DevilConnection_ModLoader) 的 ShiroNeko 原始版本 的第三次 Rebuild。
 
 ---
 
 ## 📖 项目简介
 
 `DevilConnection_ModLoader` 是专为游戏 **《でびるコネクショん》** 设计的模组加载引擎。  
-它能够在 **不修改原版游戏文件** 的前提下，于运行时动态替换或注入自定义内容，实现高度灵活的模组支持。
+它能够在 **不修改原版游戏文件** 的前提下，于运行时动态替换或注入自定义内容，实现高度灵活的模组支持。  
+Rebuild 版多了一些规范，并修复了原版中的些许小问题。
 
 ---
 
 ## ✨ 核心特性
 
 - **模组无感加载**  
-  自动拦截并映射 `resources/plugins` 目录下的文件夹或 `.asar` 归档文件，无需手动干预。
+  运行时拦截文件读取，把 `resources/plugins` 下的 `.asar` 模组映射覆盖进游戏，不改动任何原版文件。
 
-- **动态解密引擎**  
-  支持基于 **RSA + AES** 的资源加密方案，安全加载加密模组资源。
+- **hook.js 脚本注入**  
+  每个模组的 `hook.js` 在游戏页面脚本之前、按优先级顺序注入主世界，页面重载自动重注入。
 
-- **脚本动态注入**  
-  自动检测并执行 `plugins/xxx/hook.js` 脚本，允许对游戏逻辑进行深度定制与扩展。
+- **加载优先级**  
+  模组按 `NNN_` 数字前缀排序，数字越小优先级越高；同名文件由靠前者覆盖。
 
-- **插件加载优先级机制**  
-  `plugins` 目录中的模组按加载顺序分配优先级 (数字越小优先级越高) 。若多个模组包含同名文件，系统将优先使用 **优先级靠前(加载序号小)** 的模组内容。  
-  您可通过查看 `resources/mod_loader.log` 日志确认实际加载顺序，请确保游戏本体 `app.bak.asar` 是 **最后加载(优先级靠后)** 的，例如：
+- **加密模组支持**  
+  兼容基于 **RSA + AES**（`DC_ENC_v1`）的加密资源方案。
 
-> [信息] 扫描完成, 已加载 2 个模组.
-> 
-> [信息] 优先级 [1]: 心声助手.asar
-> 
-> [信息] 优先级 [2]: app.bak.asar
+- **场景补丁注入**  
+  拦截 `chara_define.ks` / `plugin.ks`，把模组的角色 / 插件定义注入到 `[return]` 前。
+
+- **mods.json 信息与版本验证**  
+  用 `mods.json` 声明描述和其他重要信息，可自动判定升级降级。
+
+- **拖放 & 压缩包导入**  
+  可直接拖入 `asar` 或 `zip` 与 `rar` 压缩包，自动识别和解压 asar 与对应 config 文件夹。
+
+- **模组形态**  
+  模组禁用使用改后缀加 `.disable` 来实现，且不再允许非 asar 的文件或文件夹干扰模组加载。
 
 ---
 
 ## ⚖️ 许可与版权声明
 
-- **二改作者**：逍婉瑶  
+- **三改作者**：[Wangchai](https://github.com/Luoyu-Wangchai)  
+- **二改作者**：[逍婉瑶](https://github.com/shouennyou)  
 - **原始版本作者**：[ShiroNeko](https://steamcommunity.com/app/3054820/discussions/0/671726388306530312/)  
 
 > **Copyright (c) 2026, 逍婉瑶. All rights reserved.**
@@ -56,8 +63,8 @@
 
 ## 📅 更新日志
 
-### v2026-01-19
-- ✅ **[重构]** 首次正式发布 `DevilConnection_ModLoader`。  
-- 🔗 **[兼容]** 完整支持原作者 ShiroNeko 的补丁加载机制。
+### v2026-07-08
+- ✅ **[重构]** 首次正式发布 `DevilConnection_ModLoader_Rebuild`。  
+- 🔗 **[兼容]** 兼容 ShiroNeko 原版 与 逍婉瑶二改 两个版本的补丁加载机制。
 
-> 💬 **反馈建议**：如遇 Bug 或有功能建议，欢迎通过 [Issues](https://github.com/shouennyou/DevilConnection_ModLoader/issues) 提交！
+> 💬 **反馈建议**：如遇 Bug 或有功能建议，欢迎通过 [Issues](https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/issues) 提交！

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+	<title>恶魔连结 · 模组管理</title>
+	<script src="vendor/tailwind.browser.js"></script>
+	<script src="vendor/Sortable.min.js"></script>
+	<style type="text/tailwindcss">
+		@theme {
+			--color-mist: #f5f3ff;
+			--color-accent: #7c3aed;
+			--color-border: #e5e7eb;
+			--color-surface: #ffffff;
+			--color-text: #1f2937;
+			--shadow-glass: 0 8px 32px 0 rgba(91, 33, 182, 0.10);
+			--shadow-drag: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+		}
+		@layer base {
+			body { @apply bg-mist text-text antialiased overflow-hidden h-screen w-screen flex flex-col md:flex-row; }
+			* { user-select: none; -webkit-user-select: none; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+		}
+		@layer components {
+			.nav-item { @apply flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/50 text-slate-500 font-medium whitespace-nowrap; }
+			.nav-item.active { @apply bg-accent text-white shadow-lg shadow-accent/20; }
+			.page-container { @apply hidden opacity-0 translate-y-4 h-full overflow-y-auto pb-24 md:pb-8; }
+			.page-container.active { @apply block opacity-100 translate-y-0; }
+			.card { @apply bg-white rounded-2xl p-4 md:p-6 border border-slate-100 shadow-glass; }
+			.btn-primary { @apply bg-accent text-white px-4 md:px-6 py-2 rounded-xl hover:brightness-110 active:scale-95 disabled:opacity-50 text-sm md:text-base; }
+			.btn-secondary { @apply bg-slate-100 text-slate-600 px-4 md:px-6 py-2 rounded-xl hover:bg-slate-200 active:scale-95 text-sm md:text-base; }
+			.ghost-item { @apply bg-accent/5 border-2 border-dashed border-accent/20 rounded-xl opacity-50 !transition-none; }
+			.dragging-item { @apply opacity-100 shadow-drag scale-[1.02] rotate-1 bg-white z-[100] cursor-grabbing !transition-none; }
+			.chosen-item { @apply bg-slate-50 scale-[0.98]; }
+			.switch { @apply relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none cursor-pointer shrink-0; }
+			.switch-dot { @apply inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ease-in-out; }
+			.switch-on { @apply bg-accent; }
+			.switch-off { @apply bg-slate-200; }
+			.switch-dot-on { @apply translate-x-6; }
+			.switch-dot-off { @apply translate-x-1; }
+			.drag-handle { @apply cursor-grab active:cursor-grabbing p-2 -ml-2 text-slate-300 hover:text-accent transition-colors; }
+		}
+		::-webkit-scrollbar { width: 4px; }
+		::-webkit-scrollbar-thumb { @apply bg-slate-200 rounded-full; }
+	</style>
+</head>
+<body class="flex flex-col md:flex-row">
+	<aside class="w-full md:w-64 border-b md:border-b-0 md:border-r border-slate-200 bg-white/80 backdrop-blur-md p-4 md:p-6 flex flex-row md:flex-col shrink-0 z-40">
+		<div class="hidden md:flex items-center gap-3 px-2 mb-10">
+			<div class="w-8 h-8 bg-accent rounded-lg flex items-center justify-center text-white font-bold text-sm">D</div>
+			<h1 class="text-xl font-bold tracking-tight">模组管理</h1>
+		</div>
+		<nav class="flex flex-row md:flex-col gap-2 flex-1 justify-around md:justify-start overflow-x-auto no-scrollbar">
+			<div data-page-btn="home" class="nav-item active flex-1 md:flex-none justify-center md:justify-start">
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+				<span class="hidden sm:inline">控制台</span>
+			</div>
+			<div data-page-btn="mods" class="nav-item flex-1 md:flex-none justify-center md:justify-start">
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+				<span class="hidden sm:inline">模组</span>
+			</div>
+			<div data-page-btn="backups" class="nav-item flex-1 md:flex-none justify-center md:justify-start">
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+				<span class="hidden sm:inline">备份</span>
+			</div>
+			<div data-page-btn="about" class="nav-item flex-1 md:flex-none justify-center md:justify-start">
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+				<span class="hidden sm:inline">关于</span>
+			</div>
+			<div data-page-btn="rebuild" class="nav-item flex-1 md:flex-none justify-center md:justify-start">
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+				<span class="hidden sm:inline">Re-Build</span>
+			</div>
+		</nav>
+	</aside>
+	<main class="flex-1 relative overflow-hidden flex flex-col w-full">
+		<section id="page-home" class="page-container active p-4 md:p-8">
+			<header class="mb-6 md:mb-10"><h2 class="text-2xl md:text-3xl font-bold text-slate-800">模组管理面板</h2></header>
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
+				<div class="card sm:col-span-2 flex flex-col sm:flex-row items-center justify-between bg-gradient-to-br from-accent to-fuchsia-600 border-none gap-6">
+					<div class="text-white text-center sm:text-left">
+						<h3 class="text-xl md:text-2xl font-bold">DevilConnection ModLoader</h3>
+						<p id="backup-state" class="text-white/70 text-xs mt-1">正在检查自动备份状态...</p>
+					</div>
+					<button id="btn-start" class="w-full sm:w-auto bg-white text-accent px-8 py-3 md:py-4 rounded-2xl font-bold text-base md:text-lg shadow-xl hover:scale-105 active:scale-95"> 启动游戏 </button>
+				</div>
+				<div class="card group hover:border-accent/30 cursor-pointer flex items-center md:block gap-4" onclick="switchPage('mods')">
+					<div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-amber-50 text-amber-500 flex items-center justify-center md:mb-4 group-hover:scale-110 shrink-0">
+						<svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+					</div>
+					<h4 class="font-bold text-base md:text-lg">管理模组</h4>
+				</div>
+				<div class="card group hover:border-accent/30 cursor-pointer flex items-center md:block gap-4" onclick="switchPage('backups')">
+					<div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-emerald-50 text-emerald-500 flex items-center justify-center md:mb-4 group-hover:scale-110 shrink-0">
+						<svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+					</div>
+					<h4 class="font-bold text-base md:text-lg">存档备份</h4>
+				</div>
+			</div>
+		</section>
+		<section id="page-mods" class="page-container p-4 md:p-8">
+			<header class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6 md:mb-8">
+				<div class="min-w-0">
+					<h2 class="text-2xl md:text-3xl font-bold">模组管理</h2>
+					<p class="text-xs md:text-sm text-slate-400 mt-2">加载顺序由上至下（序号越小优先级越高）· 拖拽左侧句柄排序 · 仅支持 .asar 模组</p>
+					<p class="text-[11px] text-slate-400 mt-1">可直接把 .asar / .zip / .rar 拖入本窗口安装或更新模组</p>
+					<p class="text-[11px] text-amber-600 mt-1">在此调整好后，点右上角返回控制台「启动游戏」即生效；游戏运行中改动则下次启动生效</p>
+				</div>
+				<div class="flex gap-2 shrink-0 w-full md:w-auto">
+					<button id="btn-open-mods-folder" class="flex-1 md:flex-none btn-secondary whitespace-nowrap">打开模组文件夹</button>
+					<button id="btn-import-mod" class="flex-1 md:flex-none btn-primary whitespace-nowrap">导入新模组</button>
+				</div>
+			</header>
+			<div id="asar-box" class="mb-4"></div>
+			<div class="card p-0 overflow-hidden">
+				<div class="bg-slate-50/50 px-4 md:px-6 py-2 md:py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex justify-between">
+					<span>模组列表</span><span class="hidden sm:block">操作</span>
+				</div>
+				<div id="mod-list" class="divide-y divide-slate-100"><div class="p-10 text-center text-slate-400">正在加载模组...</div></div>
+			</div>
+		</section>
+		<section id="page-backups" class="page-container p-4 md:p-8">
+			<header class="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 md:mb-8 gap-4">
+				<div>
+					<h2 class="text-2xl md:text-3xl font-bold text-slate-800">备份中心</h2>
+					<p class="text-xs md:text-sm text-slate-400 mt-1">管理和保护你的存档进度（_storage）</p>
+				</div>
+				<div class="flex w-full md:w-auto gap-2">
+					<button id="btn-export-current" class="flex-1 md:flex-none btn-secondary">导出当前存档</button>
+					<button id="btn-import-backup" class="flex-1 md:flex-none btn-secondary">导入备份</button>
+					<button id="btn-create-backup" class="flex-1 md:flex-none btn-primary">手动备份</button>
+				</div>
+			</header>
+			<div class="flex flex-col lg:grid lg:grid-cols-3 gap-6">
+				<aside class="order-2 lg:order-1 space-y-4 md:space-y-6">
+					<div class="card space-y-4">
+						<h4 class="font-bold text-slate-700 border-b pb-2 text-sm md:text-base">自动备份设置</h4>
+						<div class="flex items-center justify-between">
+							<span class="text-sm">启用自动备份</span>
+							<button id="auto-enabled-toggle" class="switch switch-off"><span class="switch-dot switch-dot-off"></span></button>
+						</div>
+						<div class="grid grid-cols-2 lg:grid-cols-1 gap-4">
+							<div class="space-y-1"><label class="text-[10px] text-slate-400">保留天数</label><input type="number" id="keep-days" class="w-full bg-slate-50 border-none rounded-lg px-3 py-2 text-sm focus:ring-2 ring-accent/20"></div>
+							<div class="space-y-1"><label class="text-[10px] text-slate-400">最大个数</label><input type="number" id="max-count" class="w-full bg-slate-50 border-none rounded-lg px-3 py-2 text-sm focus:ring-2 ring-accent/20"></div>
+						</div>
+					</div>
+				</aside>
+				<div class="order-1 lg:order-2 lg:col-span-2">
+					<div class="card p-0 overflow-hidden">
+						<div class="bg-slate-50/50 px-4 md:px-6 py-2 md:py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex justify-between">
+							<span>备份记录</span><span class="hidden sm:block">操作</span>
+						</div>
+						<div id="backup-list" class="divide-y divide-slate-100 min-h-[200px]"><div class="p-10 text-center text-slate-300 italic text-xs">暂无备份记录</div></div>
+					</div>
+				</div>
+			</div>
+		</section>
+		<section id="page-about" class="page-container p-4 md:p-8">
+			<header class="mb-6 md:mb-8">
+				<h2 class="text-2xl md:text-3xl font-bold text-slate-800">关于</h2>
+				<p class="text-xs md:text-sm text-slate-400 mt-1">DevilConnection ModLoader · 模组管理面板</p>
+			</header>
+			<div class="space-y-4 md:space-y-6">
+				<div class="card">
+					<h3 class="text-base md:text-lg font-bold text-slate-800 mb-2">这是什么</h3>
+					<p class="text-sm leading-relaxed text-slate-600">本面板用于管理《でびるコネクショん（恶魔连结）》的模组与存档备份。模组加载器在不改动游戏原版文件的前提下，于运行时把 <code>resources/plugins</code> 下的模组内容映射进游戏，实现汉化、换图、脚本扩展等。游戏内随时按 <b>F10</b> 呼出本面板。</p>
+				</div>
+				<div class="card">
+					<h3 class="text-base md:text-lg font-bold text-slate-800 mb-3">使用说明</h3>
+					<ul class="list-disc pl-5 space-y-2 text-sm text-slate-600 leading-relaxed">
+						<li>模组按列表顺序加载，序号越小优先级越高；同名文件由优先级靠前的模组覆盖。</li>
+						<li>拖拽左侧句柄可调整顺序；可随时启用/禁用、改名、删除模组。</li>
+						<li>导入未知来源模组前，建议先在「备份」页备份存档。</li>
+						<li>游戏本体 <code>app.bak.asar</code> 永远最后加载，不在模组列表中显示。</li>
+					</ul>
+				</div>
+				<div class="card border-amber-100 bg-amber-50/40">
+					<h3 class="text-base md:text-lg font-bold text-amber-700 mb-2">免责声明</h3>
+					<p class="text-sm leading-relaxed text-amber-800/90">本工具为粉丝制作的第三方工具，与游戏开发商无关，仅供学习交流。使用产生的风险（含存档损坏）由使用者自行承担，请尊重游戏及相关资源的版权与使用条款。</p>
+				</div>
+			</div>
+		</section>
+		<section id="page-rebuild" class="page-container p-4 md:p-8">
+			<header class="mb-6 md:mb-8">
+				<h2 class="text-2xl md:text-3xl font-bold text-slate-800">Re-Build</h2>
+				<p class="text-xs md:text-sm text-slate-400 mt-1">DevilConnection ModLoader · Fork Rebuild</p>
+			</header>
+			<div class="space-y-4 md:space-y-6">
+				<div class="card">
+					<h3 class="text-base md:text-lg font-bold text-slate-800 mb-3">关于本版本</h3>
+					<p class="text-sm leading-relaxed text-slate-600">本项目为 <a id="rebuild-repo-link" href="#" class="text-accent font-medium underline decoration-dotted underline-offset-2 hover:opacity-80 break-all">github.com/shouennyou/DevilConnection_ModLoader</a> 的 <b>Fork rebuild</b>。核心加载机制与原版基本一致，常规模组通常在两个版本之间都能用；但本 Fork 在原版基础上额外做了一些扩展，例如让游戏的 Worker 脚本（如 APNG 解码器）也能被模组拦截或替换。<b>依赖这些扩展的模组可能仅限本 Fork</b>。</p>
+				</div>
+				<div class="card border-amber-200 bg-amber-50/50">
+					<h3 class="text-base md:text-lg font-bold text-amber-700 mb-2">⚠ 重要提醒</h3>
+					<p class="text-sm leading-relaxed text-amber-800/90">使用依赖本 Fork 加载器所遇到的问题，<b>请来打扰王柴</b>，而不是打扰 DevilConnection_ModLoader 的原作者。</p>
+				</div>
+			</div>
+		</section>
+		<div id="task-progress-wrap" class="hidden fixed bottom-20 md:bottom-6 right-4 left-4 md:left-auto md:w-80 bg-white shadow-2xl rounded-2xl p-4 border border-slate-100 z-50">
+			<div class="flex items-center justify-between mb-2">
+				<span id="task-progress-title" class="text-xs font-bold text-slate-700 truncate w-32">任务进行中</span>
+				<span id="task-progress-percent" class="text-[10px] font-mono text-accent">0%</span>
+			</div>
+			<div class="w-full bg-slate-100 h-1 rounded-full overflow-hidden"><div id="task-progress" class="bg-accent h-full w-0 transition-all duration-300"></div></div>
+			<p id="task-progress-text" class="text-[9px] text-slate-400 mt-2 truncate">请稍候...</p>
+		</div>
+	</main>
+	<div id="modal-container" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+		<div id="confirm-dialog" class="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl scale-95 opacity-0 transition-all duration-300">
+			<h3 id="confirm-title" class="text-lg font-bold mb-1">提示</h3>
+			<p id="confirm-message" class="text-sm text-slate-500 mb-6 leading-relaxed">确认内容...</p>
+			<div id="confirm-input-wrap" class="hidden mb-4"><input type="text" id="confirm-input" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:border-accent outline-none"></div>
+			<div class="flex gap-2 justify-end">
+				<button id="confirm-cancel" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-lg">取消</button>
+				<button id="confirm-ok" class="bg-accent text-white px-4 py-2 text-sm rounded-lg shadow-sm">确定</button>
+			</div>
+		</div>
+	</div>
+	<script type="module" src="js/script.js"></script>
+</body>
+</html>

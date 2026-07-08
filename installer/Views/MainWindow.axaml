@@ -1,0 +1,103 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        x:Class="DevilConnectionModLoaderInstaller.Views.MainWindow"
+        Title="DevilConnection ModLoader 安装器"
+        Width="720" Height="620"
+        MinWidth="640" MinHeight="560"
+        WindowStartupLocation="CenterScreen"
+        Background="#15101f">
+
+    <Window.Resources>
+        <LinearGradientBrush x:Key="HeaderBrush" StartPoint="0%,0%" EndPoint="100%,100%">
+            <GradientStop Offset="0" Color="#7c3aed" />
+            <GradientStop Offset="1" Color="#c026d3" />
+        </LinearGradientBrush>
+        <SolidColorBrush x:Key="CardBrush" Color="#1e1730" />
+        <SolidColorBrush x:Key="Accent" Color="#a78bfa" />
+    </Window.Resources>
+
+    <Window.Styles>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="{StaticResource HeaderBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="18,11" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#8b5cf6" />
+        </Style>
+        <Style Selector="Button.ghost">
+            <Setter Property="Background" Value="#2a2140" />
+            <Setter Property="Foreground" Value="#d6ccf5" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="16,11" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#382c55" />
+        </Style>
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="{StaticResource CardBrush}" />
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="Padding" Value="18" />
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="0">
+
+        <Border Grid.Row="0" Background="{StaticResource HeaderBrush}" Padding="24,22">
+            <StackPanel>
+                <TextBlock Text="DevilConnection ModLoader" Foreground="White" FontSize="24" FontWeight="Bold" />
+                <TextBlock Text="《でびるコネクショん（恶魔连结）》模组加载器 · 安装工具" Foreground="#f0e9ff" FontSize="12.5" Margin="0,4,0,0" />
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="1" Classes="card" Margin="20,18,20,8">
+            <StackPanel Spacing="12">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                    <TextBlock Grid.Column="0" Text="游戏目录" Foreground="{StaticResource Accent}" FontWeight="Bold" VerticalAlignment="Center" />
+                    <Border Grid.Column="1" Background="#120d1f" CornerRadius="8" Padding="12,9" Margin="14,0">
+                        <TextBlock x:Name="PathText" Text="正在自动定位..." Foreground="#cfc4ec" FontSize="12.5" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    </Border>
+                    <Button Grid.Column="2" x:Name="BrowseBtn" Classes="ghost" Content="浏览..." Click="OnBrowse" />
+                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Border x:Name="StatusBadge" Background="#3a2f55" CornerRadius="6" Padding="10,4">
+                        <TextBlock x:Name="StatusText" Text="未知" Foreground="White" FontSize="12" FontWeight="Bold" />
+                    </Border>
+                    <TextBlock x:Name="HintText" Text="" Foreground="#9d90c2" FontSize="12" VerticalAlignment="Center" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2" Classes="card" Margin="20,8,20,8">
+            <Grid RowDefinitions="Auto,Auto,*">
+                <WrapPanel Grid.Row="0" Orientation="Horizontal">
+                    <Button x:Name="InstallBtn" Classes="primary" Content="安装 / 更新" Click="OnInstall" Margin="0,0,10,10" />
+                    <Button x:Name="UninstallBtn" Classes="ghost" Content="卸载 / 还原原版" Click="OnUninstall" Margin="0,0,10,10" />
+                    <Button x:Name="LaunchBtn" Classes="ghost" Content="启动游戏" Click="OnLaunch" Margin="0,0,10,10" />
+                    <Button x:Name="PluginsBtn" Classes="ghost" Content="打开模组文件夹" Click="OnOpenPlugins" Margin="0,0,10,10" />
+                </WrapPanel>
+                <TextBlock Grid.Row="1" Text="运行日志" Foreground="{StaticResource Accent}" FontWeight="Bold" Margin="2,6,0,6" />
+                <Border Grid.Row="2" Background="#0f0b1a" CornerRadius="10" Padding="2">
+                    <ScrollViewer x:Name="LogScroll">
+                        <TextBox x:Name="LogBox" IsReadOnly="True" TextWrapping="Wrap"
+                                 Background="Transparent" BorderThickness="0" Foreground="#c9bff0"
+                                 FontFamily="Consolas,Cascadia Mono,monospace" FontSize="12.5"
+                                 Text="就绪。" />
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="3" Background="#1a1428" Padding="20,12">
+            <TextBlock Foreground="#8a7db0" FontSize="11.5" TextWrapping="Wrap"
+                       Text="安装会把原版 app.asar 备份为 plugins/app.bak.asar，并部署加载器壳。模组放入 resources/plugins，游戏内按 F10 呼出管理面板。操作前请完全关闭游戏。本工具为粉丝制作，使用风险自负。" />
+        </Border>
+    </Grid>
+</Window>
