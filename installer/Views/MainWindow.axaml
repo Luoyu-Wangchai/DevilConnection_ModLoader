@@ -72,6 +72,7 @@
                     </Border>
                     <TextBlock x:Name="HintText" Text="" Foreground="#9d90c2" FontSize="12" VerticalAlignment="Center" />
                 </StackPanel>
+                <TextBlock x:Name="VersionText" Text="" Foreground="#b3a6da" FontSize="12" TextWrapping="Wrap" />
             </StackPanel>
         </Border>
 

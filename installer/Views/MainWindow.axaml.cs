@@ -49,7 +49,39 @@ public partial class MainWindow : Window
             InstallStatus.NotInstalled => "原版游戏，尚未安装 ModLoader",
             _ => "目录异常：未找到 resources/app.asar"
         });
+        UpdateVersionInfo(status);
         Log($"已定位游戏：{_inst.GameRoot}");
+    }
+
+    // 模组管理器版本检测：显示已装版本 vs 安装器内置版本，并给出升级/重装提示（版本号来自 version.json，显示加 RV 前缀）
+    private void UpdateVersionInfo(InstallStatus status)
+    {
+        string? bundledRaw = ModLoaderInstaller.GetBundledVersion();
+        string bundled = bundledRaw is null ? "未知" : "RV" + bundledRaw;
+        if (_inst is not null && status == InstallStatus.Installed)
+        {
+            string? installedRaw = _inst.GetInstalledVersion();
+            if (installedRaw is null)
+            {
+                VersionText.Text = $"已安装管理器（版本未知） · 安装器内置 {bundled}";
+            }
+            else
+            {
+                int cmp = ModLoaderInstaller.CompareVersions(installedRaw, bundledRaw ?? "");
+                string rel = cmp < 0 ? "点「安装 / 更新」可升级"
+                           : cmp > 0 ? "已安装版本更新，内置为旧版"
+                           : "已是最新版本";
+                VersionText.Text = $"已安装 RV{installedRaw} · 安装器内置 {bundled} —— {rel}";
+            }
+        }
+        else if (status == InstallStatus.NotInstalled)
+        {
+            VersionText.Text = $"安装器内置管理器版本 {bundled}";
+        }
+        else
+        {
+            VersionText.Text = "";
+        }
     }
 
     private void SetStatus(InstallStatus s, string hint)
@@ -144,6 +176,7 @@ public partial class MainWindow : Window
                     InstallStatus.NotInstalled => "原版游戏，尚未安装 ModLoader",
                     _ => "目录异常：未找到 resources/app.asar"
                 });
+                UpdateVersionInfo(s);
             }
         }
     }

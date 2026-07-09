@@ -42,6 +42,12 @@ export const desktopApi = {
 	openExternal(url) {
 		return window.desktopUI.openExternal(url);
 	},
+	getAppInfo() {
+		return window.desktopUI.getAppInfo();
+	},
+	checkForUpdate() {
+		return window.desktopUI.checkForUpdate();
+	},
 
 	autoBackup(settings) {
 		return window.desktopUI.autoBackup(settings);

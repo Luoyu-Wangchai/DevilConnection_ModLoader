@@ -74,9 +74,9 @@
 	</aside>
 	<main class="flex-1 relative overflow-hidden flex flex-col w-full">
 		<section id="page-home" class="page-container active p-4 md:p-8">
-			<header class="mb-6 md:mb-10"><h2 class="text-2xl md:text-3xl font-bold text-slate-800">模组管理面板</h2></header>
-			<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
-				<div class="card sm:col-span-2 flex flex-col sm:flex-row items-center justify-between bg-gradient-to-br from-accent to-fuchsia-600 border-none gap-6">
+			<header class="mb-6 md:mb-10"><h2 id="app-title" class="text-2xl md:text-3xl font-bold text-slate-800">恶魔连结模组管理器 RV1.2.2</h2></header>
+			<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
+				<div class="card sm:col-span-3 flex flex-col sm:flex-row items-center justify-between bg-gradient-to-br from-accent to-fuchsia-600 border-none gap-6">
 					<div class="text-white text-center sm:text-left">
 						<h3 class="text-xl md:text-2xl font-bold">DevilConnection ModLoader</h3>
 						<p id="backup-state" class="text-white/70 text-xs mt-1">正在检查自动备份状态...</p>
@@ -94,6 +94,12 @@
 						<svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
 					</div>
 					<h4 class="font-bold text-base md:text-lg">存档备份</h4>
+				</div>
+				<div id="card-check-update" class="card group hover:border-accent/30 cursor-pointer flex items-center md:block gap-4" title="检查是否有新版本">
+					<div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-sky-50 text-sky-500 flex items-center justify-center md:mb-4 group-hover:scale-110 shrink-0">
+						<svg id="check-update-icon" class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+					</div>
+					<h4 id="check-update-label" class="font-bold text-base md:text-lg">检查更新</h4>
 				</div>
 			</div>
 		</section>
@@ -182,12 +188,13 @@
 		<section id="page-rebuild" class="page-container p-4 md:p-8">
 			<header class="mb-6 md:mb-8">
 				<h2 class="text-2xl md:text-3xl font-bold text-slate-800">Re-Build</h2>
-				<p class="text-xs md:text-sm text-slate-400 mt-1">DevilConnection ModLoader · Fork Rebuild</p>
+				<p class="text-xs md:text-sm text-slate-400 mt-1">DevilConnection ModLoader · <a href="#" class="js-fork-link text-accent font-medium underline decoration-dotted underline-offset-2 hover:opacity-80">Fork rebuild</a></p>
 			</header>
 			<div class="space-y-4 md:space-y-6">
 				<div class="card">
 					<h3 class="text-base md:text-lg font-bold text-slate-800 mb-3">关于本版本</h3>
 					<p class="text-sm leading-relaxed text-slate-600">本项目为 <a id="rebuild-repo-link" href="#" class="text-accent font-medium underline decoration-dotted underline-offset-2 hover:opacity-80 break-all">github.com/shouennyou/DevilConnection_ModLoader</a> 的 <b>Fork rebuild</b>。核心加载机制与原版基本一致，常规模组通常在两个版本之间都能用；但本 Fork 在原版基础上额外做了一些扩展，例如让游戏的 Worker 脚本（如 APNG 解码器）也能被模组拦截或替换。<b>依赖这些扩展的模组可能仅限本 Fork</b>。</p>
+						<p class="text-sm leading-relaxed text-slate-600 mt-3">本 Fork 仓库（点击前往）：<a href="#" class="js-fork-link text-accent font-medium underline decoration-dotted underline-offset-2 hover:opacity-80 break-all">github.com/Luoyu-Wangchai/DevilConnection_ModLoader</a></p>
 				</div>
 				<div class="card border-amber-200 bg-amber-50/50">
 					<h3 class="text-base md:text-lg font-bold text-amber-700 mb-2">⚠ 重要提醒</h3>

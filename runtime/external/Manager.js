@@ -10,6 +10,25 @@ const GAME_BODY = 'app.bak.asar';
 const DISABLE_EXT = '.disable';
 const MOD_META_FILE = 'mods.json';
 
+// 版本号单一真源 = resources/version.json（安装器部署）。RV 只是显示前缀，真正版本号是里面的 version(如 1.2.1)。
+const VERSION_PREFIX = 'RV';
+const DEFAULT_REPO = 'Luoyu-Wangchai/DevilConnection_ModLoader';
+function readVersionInfo() {
+	try {
+		const p = path.join(D.resourcesPath, 'version.json');
+		if (fs.existsSync(p)) {
+			const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+			return {
+				version: String(j.version || '0.0.0'),
+				repo: String(j.repo || DEFAULT_REPO),
+				name: String(j.name || 'DevilConnection ModLoader')
+			};
+		}
+	} catch (e) {}
+	return { version: '0.0.0', repo: DEFAULT_REPO, name: 'DevilConnection ModLoader' };
+}
+function displayVersion(v) { return VERSION_PREFIX + v; }
+
 function pluginsDir() { return path.join(D.resourcesPath, 'plugins'); }
 function gameRoot() { return path.resolve(D.resourcesPath, '..'); }
 function storageDir() { return path.join(gameRoot(), '_storage'); }
@@ -87,7 +106,7 @@ function scanDiskMods() {
 	ensureDir(dir);
 	let names;
 	try { names = fs.readdirSync(dir); } catch (e) { return []; }
-	const reserved = new Set(['app.bak.asar', 'mods.config.json', '.meta.json', 'mod_loader.log', 'config']);
+	const reserved = new Set(['app.bak.asar', 'mods.config.json', '.meta.json', 'mod_loader.log', 'config', '.update']);
 	const byCanonical = new Map();
 	for (const name of names) {
 		if (name.startsWith('.')) continue;
@@ -690,6 +709,66 @@ async function openExternal(url) {
 	} catch (e) { return fail(e.message); }
 }
 
+// 面板信息(供渲染层读版本号/仓库, 全部来自 version.json 单一真源)
+function getAppInfo() {
+	const v = readVersionInfo();
+	return ok({
+		version: v.version,                       // "1.2.1"
+		displayVersion: displayVersion(v.version), // "RV1.2.1"
+		name: v.name,
+		repo: v.repo,
+		repoUrl: 'https://github.com/' + v.repo
+	});
+}
+
+// 从版本串里抽出数字段(容忍 "RV1.2.1" / "v1.2.1" / "1.2.1" 前缀)
+function parseVer(s) {
+	const m = String(s || '').match(/(\d+(?:\.\d+)*)/);
+	return m ? m[1].split('.').map(n => parseInt(n, 10) || 0) : null;
+}
+function cmpVer(a, b) {
+	const pa = parseVer(a), pb = parseVer(b);
+	if (!pa || !pb) return 0;
+	const len = Math.max(pa.length, pb.length);
+	for (let i = 0; i < len; i++) {
+		const x = pa[i] || 0, y = pb[i] || 0;
+		if (x !== y) return x < y ? -1 : 1;
+	}
+	return 0;
+}
+
+// 去 GitHub release 检查有无新版(网络请求在主进程做, 见 Plan §5)
+async function checkForUpdate() {
+	const v = readVersionInfo();
+	const ctrl = new AbortController();
+	const timer = setTimeout(() => ctrl.abort(), 12000);
+	try {
+		const api = `https://api.github.com/repos/${v.repo}/releases/latest`;
+		const resp = await fetch(api, {
+			headers: { 'User-Agent': 'DevilConnection-ModLoader', 'Accept': 'application/vnd.github+json' },
+			signal: ctrl.signal
+		});
+		if (resp.status === 404) {
+			return ok({ hasUpdate: false, current: displayVersion(v.version), latest: null, note: '仓库暂无发布版本' });
+		}
+		if (!resp.ok) return fail(`GitHub 返回 ${resp.status}`, 'http');
+		const rel = await resp.json();
+		const tag = rel.tag_name || rel.name || '';
+		return ok({
+			hasUpdate: cmpVer(v.version, tag) < 0,
+			current: displayVersion(v.version),
+			latest: tag || null,
+			url: rel.html_url || ('https://github.com/' + v.repo + '/releases'),
+			notes: rel.body || '',
+			publishedAt: rel.published_at || ''
+		});
+	} catch (e) {
+		return fail(e.name === 'AbortError' ? '检查更新超时, 请检查网络' : (e.message || '网络错误'), 'network');
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 function setup(deps) {
 	D = deps;
 	AdmZip = deps.admZip;
@@ -708,6 +787,8 @@ function setup(deps) {
 		'mgr:saveModConfig': (e, idx, values) => saveModConfig(idx, values),
 		'mgr:openModsFolder': () => openModsFolder(),
 		'mgr:openExternal': (e, url) => openExternal(url),
+		'mgr:getAppInfo': () => getAppInfo(),
+		'mgr:checkForUpdate': () => checkForUpdate(),
 
 		'mgr:autoBackup': (e, s) => autoBackup(s),
 		'mgr:getBackupsData': () => getBackupsData(),

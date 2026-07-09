@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('desktopUI', {
 	saveModConfig: (idx, values) => invoke('mgr:saveModConfig', idx, values),
 	openModsFolder: () => invoke('mgr:openModsFolder'),
 	openExternal: (url) => invoke('mgr:openExternal', url),
+	getAppInfo: () => invoke('mgr:getAppInfo'),
+	checkForUpdate: () => invoke('mgr:checkForUpdate'),
 
 	autoBackup: (settings) => invoke('mgr:autoBackup', settings),
 	getBackupsData: () => invoke('mgr:getBackupsData'),

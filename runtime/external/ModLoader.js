@@ -24,7 +24,7 @@ const BLACKLIST = new Set([
 	'modloader.js', 'manager.js', 'package.json', 'main.js',
 	'preload.js', 'preload_manager.js', 'steam.js', 'node_modules',
 	'manager', 'private.pem', 'public.pem', '.env', '.env.example',
-	'config'
+	'config', 'version.json', '.update'
 ]);
 
 const O = {
