@@ -745,8 +745,7 @@ async function checkForUpdate() {
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), 12000);
 	try {
-		const api = `https://api.github.com/repos/${v.repo}/releases/latest`;
-		const resp = await fetch(api, {
+		const resp = await fetch(`https://api.github.com/repos/${v.repo}/releases/latest`, {
 			headers: { 'User-Agent': 'DevilConnection-ModLoader', 'Accept': 'application/vnd.github+json' },
 			signal: ctrl.signal
 		});
@@ -756,13 +755,10 @@ async function checkForUpdate() {
 		if (!resp.ok) return fail(`GitHub 返回 ${resp.status}`, 'http');
 		const rel = await resp.json();
 		const tag = rel.tag_name || rel.name || '';
-		// 该 release 是否带 update.zip 资产 = 能否 in-app 自动更新
-		const canAutoUpdate = !!((rel.assets || []).find(a => a.name === 'update.zip'));
 		return ok({
 			hasUpdate: cmpVer(v.version, tag) < 0,
 			current: displayVersion(v.version),
 			latest: tag || null,
-			canAutoUpdate,
 			url: rel.html_url || ('https://github.com/' + v.repo + '/releases'),
 			notes: rel.body || '',
 			publishedAt: rel.published_at || ''
@@ -775,122 +771,6 @@ async function checkForUpdate() {
 }
 
 function ghHeaders() { return { 'User-Agent': 'DevilConnection-ModLoader', 'Accept': 'application/vnd.github+json' }; }
-
-// 更新助手(PowerShell)：等游戏进程退出(壳解锁)→备份→换 app.asar + 外置文件→拉起游戏。全部在进程退出后做，无锁问题。
-const HELPER_PS1 = [
-	'param([int]$GamePid,[string]$GameExe,[string]$StageDir,[string]$Resources)',
-	"$ErrorActionPreference='SilentlyContinue'",
-	'for($i=0;$i -lt 120;$i++){',
-	'  if(-not (Get-Process -Id $GamePid -ErrorAction SilentlyContinue)){ break }',
-	'  Start-Sleep -Milliseconds 500',
-	'}',
-	'Start-Sleep -Milliseconds 800',
-	"$asar=Join-Path $Resources 'app.asar'",
-	"$bak=Join-Path $Resources 'app.asar.bak_selfupdate'",
-	"$ext=Join-Path $StageDir 'external'",
-	'try{',
-	'  if(Test-Path $asar){ Copy-Item $asar $bak -Force }',
-	"  Copy-Item (Join-Path $StageDir 'app.asar') $asar -Force",
-	'  if(Test-Path $ext){',
-	'    Get-ChildItem -Path $ext -File | ForEach-Object { Copy-Item $_.FullName (Join-Path $Resources $_.Name) -Force }',
-	'    Get-ChildItem -Path $ext -Directory | ForEach-Object {',
-	'      $t=Join-Path $Resources $_.Name',
-	'      if(Test-Path $t){ Remove-Item $t -Recurse -Force }',
-	'      Copy-Item $_.FullName $t -Recurse -Force',
-	'    }',
-	'  }',
-	'}catch{',
-	'  if(Test-Path $bak){ Copy-Item $bak $asar -Force }',
-	'}',
-	'Start-Process -FilePath $GameExe',
-	''
-].join('\r\n');
-
-let updateAbort = null;
-
-// in-app 自更新：下载 update.zip(进度+可取消)→sha256 校验→解压暂存→派生助手→退出→助手换文件+重启
-async function downloadAndApplyUpdate(sender) {
-	const emit = (p) => { try { if (sender && !sender.isDestroyed()) sender.send('mgr:updateProgress', p); } catch (e) {} };
-	const v = readVersionInfo();
-	updateAbort = new AbortController();
-	try {
-		emit({ phase: 'check', pct: 0, text: '正在获取更新信息...' });
-		const relResp = await fetch(`https://api.github.com/repos/${v.repo}/releases/latest`, { headers: ghHeaders(), signal: updateAbort.signal });
-		if (!relResp.ok) return fail(`获取 release 失败 (HTTP ${relResp.status})`);
-		const rel = await relResp.json();
-		const tag = rel.tag_name || rel.name || '';
-		if (cmpVer(v.version, tag) >= 0) return fail('当前已是最新版本');
-		const assets = rel.assets || [];
-		const zipAsset = assets.find(a => a.name === 'update.zip');
-		if (!zipAsset) return fail('该版本不支持自动更新(release 缺少 update.zip)', 'noAsset');
-
-		let expectedSha = null;
-		const manifestAsset = assets.find(a => a.name === 'update.json');
-		if (manifestAsset) {
-			try {
-				const m = await (await fetch(manifestAsset.browser_download_url, { headers: ghHeaders(), signal: updateAbort.signal })).json();
-				expectedSha = m && m.sha256 ? String(m.sha256) : null;
-			} catch (e) {}
-		}
-
-		emit({ phase: 'download', pct: 0, text: '正在下载更新包...' });
-		const dl = await fetch(zipAsset.browser_download_url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: updateAbort.signal });
-		if (!dl.ok) return fail(`下载失败 (HTTP ${dl.status})`);
-		const total = Number(dl.headers.get('content-length')) || zipAsset.size || 0;
-		const reader = dl.body.getReader();
-		const chunks = []; let received = 0;
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			chunks.push(Buffer.from(value));
-			received += value.length;
-			emit({ phase: 'download', pct: total ? Math.round(received / total * 100) : 0, received, total, text: '正在下载更新包...' });
-		}
-		const buf = Buffer.concat(chunks);
-
-		if (expectedSha) {
-			const got = require('crypto').createHash('sha256').update(buf).digest('hex');
-			if (got.toLowerCase() !== expectedSha.toLowerCase()) return fail('更新包校验失败(sha256 不匹配)，已中止');
-		}
-
-		emit({ phase: 'stage', pct: 100, text: '正在准备更新...' });
-		const stagingRoot = path.join(D.resourcesPath, '.update');
-		try { fs.rmSync(stagingRoot, { recursive: true, force: true }); } catch (e) {}
-		const stageDir = path.join(stagingRoot, 'staging');
-		fs.mkdirSync(stageDir, { recursive: true });
-		// 🔴 手动解压到 original-fs：AdmZip.extractAllTo 用的是 electron 补丁版 fs，写名为 app.asar 的文件会被当成 asar 归档拦截 → chmod ENOENT。逐条目用 original-fs 写可绕开。
-		const zipObj = new AdmZip(buf);
-		for (const ent of zipObj.getEntries()) {
-			const outPath = path.join(stageDir, ent.entryName);
-			if (ent.isDirectory) { fs.mkdirSync(outPath, { recursive: true }); continue; }
-			fs.mkdirSync(path.dirname(outPath), { recursive: true });
-			fs.writeFileSync(outPath, ent.getData());
-		}
-		if (!fs.existsSync(path.join(stageDir, 'app.asar'))) return fail('更新包损坏(缺少 app.asar)');
-
-		const helperPath = path.join(stagingRoot, 'updater.ps1');
-		fs.writeFileSync(helperPath, HELPER_PS1, 'utf8');
-		emit({ phase: 'apply', pct: 100, text: '即将重启应用更新...' });
-		const { spawn } = require('child_process');
-		const child = spawn('powershell.exe',
-			['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', helperPath,
-				String(process.pid), process.execPath, stageDir, D.resourcesPath],
-			{ detached: true, stdio: 'ignore' });
-		child.unref();
-		setTimeout(() => { try { require('electron').app.quit(); } catch (e) {} }, 800);
-		return ok({ applying: true });
-	} catch (e) {
-		if (e.name === 'AbortError') return fail('已取消更新', 'canceled');
-		return fail(e.message || '更新失败', 'error');
-	} finally {
-		updateAbort = null;
-	}
-}
-
-function cancelUpdate() {
-	try { if (updateAbort) updateAbort.abort(); } catch (e) {}
-	return ok();
-}
 
 // ---- 模组更新渠道（mods.json.update）----
 // 检测单模组远端版本 → status: noChannel/noRelease/unknown/outdated/current/ahead
@@ -987,8 +867,6 @@ function setup(deps) {
 		'mgr:openExternal': (e, url) => openExternal(url),
 		'mgr:getAppInfo': () => getAppInfo(),
 		'mgr:checkForUpdate': () => checkForUpdate(),
-		'mgr:downloadAndApplyUpdate': (e) => downloadAndApplyUpdate(e.sender),
-		'mgr:cancelUpdate': () => cancelUpdate(),
 		'mgr:checkModUpdate': (e, idx) => checkModUpdate(idx),
 		'mgr:updateMod': (e, idx) => updateMod(idx),
 

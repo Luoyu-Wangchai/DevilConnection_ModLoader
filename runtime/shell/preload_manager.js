@@ -26,13 +26,6 @@ contextBridge.exposeInMainWorld('desktopUI', {
 	openExternal: (url) => invoke('mgr:openExternal', url),
 	getAppInfo: () => invoke('mgr:getAppInfo'),
 	checkForUpdate: () => invoke('mgr:checkForUpdate'),
-	downloadAndApplyUpdate: () => invoke('mgr:downloadAndApplyUpdate'),
-	cancelUpdate: () => invoke('mgr:cancelUpdate'),
-	onUpdateProgress(callback) {
-		const listener = (_e, payload) => callback(payload);
-		ipcRenderer.on('mgr:updateProgress', listener);
-		return () => ipcRenderer.removeListener('mgr:updateProgress', listener);
-	},
 
 	autoBackup: (settings) => invoke('mgr:autoBackup', settings),
 	getBackupsData: () => invoke('mgr:getBackupsData'),
