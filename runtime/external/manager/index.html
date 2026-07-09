@@ -74,7 +74,7 @@
 	</aside>
 	<main class="flex-1 relative overflow-hidden flex flex-col w-full">
 		<section id="page-home" class="page-container active p-4 md:p-8">
-			<header class="mb-6 md:mb-10"><h2 id="app-title" class="text-2xl md:text-3xl font-bold text-slate-800">恶魔连结模组管理器 RV1.2.2</h2></header>
+			<header class="mb-6 md:mb-10"><h2 id="app-title" class="text-2xl md:text-3xl font-bold text-slate-800">恶魔连结模组管理器 RV1.2.3</h2></header>
 			<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
 				<div class="card sm:col-span-3 flex flex-col sm:flex-row items-center justify-between bg-gradient-to-br from-accent to-fuchsia-600 border-none gap-6">
 					<div class="text-white text-center sm:text-left">
@@ -211,6 +211,19 @@
 			<p id="task-progress-text" class="text-[9px] text-slate-400 mt-2 truncate">请稍候...</p>
 		</div>
 	</main>
+	<div id="update-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+		<div class="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl">
+			<h3 id="update-modal-title" class="text-lg font-bold mb-1">正在更新</h3>
+			<p id="update-modal-phase" class="text-sm text-slate-500 mb-4">准备中...</p>
+			<div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-2">
+				<div id="update-modal-bar" class="bg-accent h-full w-0 transition-all duration-200"></div>
+			</div>
+			<div class="flex items-center justify-between">
+				<span id="update-modal-pct" class="text-xs font-mono text-accent">0%</span>
+				<button id="update-modal-cancel" class="px-4 py-1.5 text-sm text-slate-500 hover:bg-slate-100 rounded-lg">取消</button>
+			</div>
+		</div>
+	</div>
 	<div id="modal-container" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
 		<div id="confirm-dialog" class="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl scale-95 opacity-0 transition-all duration-300">
 			<h3 id="confirm-title" class="text-lg font-bold mb-1">提示</h3>

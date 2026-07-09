@@ -48,6 +48,15 @@ export const desktopApi = {
 	checkForUpdate() {
 		return window.desktopUI.checkForUpdate();
 	},
+	downloadAndApplyUpdate() {
+		return window.desktopUI.downloadAndApplyUpdate();
+	},
+	cancelUpdate() {
+		return window.desktopUI.cancelUpdate();
+	},
+	onUpdateProgress(callback) {
+		return window.desktopUI.onUpdateProgress(callback);
+	},
 
 	autoBackup(settings) {
 		return window.desktopUI.autoBackup(settings);
