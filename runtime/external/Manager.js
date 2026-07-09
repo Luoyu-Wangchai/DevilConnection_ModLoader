@@ -856,11 +856,16 @@ async function downloadAndApplyUpdate(sender) {
 		emit({ phase: 'stage', pct: 100, text: '正在准备更新...' });
 		const stagingRoot = path.join(D.resourcesPath, '.update');
 		try { fs.rmSync(stagingRoot, { recursive: true, force: true }); } catch (e) {}
-		fs.mkdirSync(stagingRoot, { recursive: true });
-		const zipPath = path.join(stagingRoot, 'update.zip');
-		fs.writeFileSync(zipPath, buf);
 		const stageDir = path.join(stagingRoot, 'staging');
-		new AdmZip(zipPath).extractAllTo(stageDir, true);
+		fs.mkdirSync(stageDir, { recursive: true });
+		// 🔴 手动解压到 original-fs：AdmZip.extractAllTo 用的是 electron 补丁版 fs，写名为 app.asar 的文件会被当成 asar 归档拦截 → chmod ENOENT。逐条目用 original-fs 写可绕开。
+		const zipObj = new AdmZip(buf);
+		for (const ent of zipObj.getEntries()) {
+			const outPath = path.join(stageDir, ent.entryName);
+			if (ent.isDirectory) { fs.mkdirSync(outPath, { recursive: true }); continue; }
+			fs.mkdirSync(path.dirname(outPath), { recursive: true });
+			fs.writeFileSync(outPath, ent.getData());
+		}
 		if (!fs.existsSync(path.join(stageDir, 'app.asar'))) return fail('更新包损坏(缺少 app.asar)');
 
 		const helperPath = path.join(stagingRoot, 'updater.ps1');
