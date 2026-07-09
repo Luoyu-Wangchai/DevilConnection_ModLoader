@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('desktopUI', {
 	importModFromBuffer: (fileName, bytes) => invoke('mgr:importModFromBuffer', fileName, bytes),
 	confirmPendingImport: (token) => invoke('mgr:confirmPendingImport', token),
 	cancelPendingImport: (token) => invoke('mgr:cancelPendingImport', token),
+	checkModUpdate: (idx) => invoke('mgr:checkModUpdate', idx),
+	updateMod: (idx) => invoke('mgr:updateMod', idx),
 	getModConfig: (idx) => invoke('mgr:getModConfig', idx),
 	saveModConfig: (idx, values) => invoke('mgr:saveModConfig', idx, values),
 	openModsFolder: () => invoke('mgr:openModsFolder'),

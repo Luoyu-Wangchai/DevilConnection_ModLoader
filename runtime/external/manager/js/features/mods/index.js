@@ -13,6 +13,36 @@ export function createModsManager({ askConfirm }) {
 	let modSortableInstance = null;
 	const { openConfigModal } = createConfigModal();
 
+	// 版本状态徽章填色：outdated 橘黄 / current 淡绿 / ahead 淡蓝 / 其它 灰
+	function applyModStatus(el, data) {
+		const map = {
+			outdated: ['检测到更新', 'bg-amber-100 text-amber-600'],
+			current: ['已是最新版本', 'bg-emerald-100 text-emerald-600'],
+			ahead: ['已是最新版本', 'bg-sky-100 text-sky-600'],
+			noRelease: ['暂无发布', 'bg-slate-100 text-slate-400'],
+			unknown: ['暂无法检测', 'bg-slate-100 text-slate-400'],
+			error: ['检测失败', 'bg-slate-100 text-slate-400']
+		};
+		const pair = map[data && data.status] || map.unknown;
+		el.textContent = pair[0];
+		el.className = `px-1.5 py-0.5 rounded text-[10px] shrink-0 ${pair[1]}`;
+	}
+
+	// 点「更新」：先自动检测，再按结果决定是否下载更新
+	async function handleModUpdate(idx, mod, onRefresh) {
+		const chk = normResponse(await desktopApi.checkModUpdate(idx));
+		if (!chk.ok) { await askConfirm({ title: '检测失败', message: chk.message || '无法检测更新' }); return; }
+		const d = chk.data || {};
+		if (d.status === 'current') { await askConfirm({ title: '已是最新版本', message: `「${mod.displayName || mod.name}」已是最新版本。` }); return; }
+		if (d.status === 'ahead') { await askConfirm({ title: '已是最新版本', message: `「${mod.displayName || mod.name}」当前版本高于远端，无需更新。` }); return; }
+		if (d.status !== 'outdated') { await askConfirm({ title: '暂无法更新', message: '未能确定远端版本，无法更新。' }); return; }
+		const go = await askConfirm({ title: '发现模组更新', message: `「${mod.displayName || mod.name}」有新版本 ${d.remoteDisplay || ''}，是否下载并更新？` });
+		if (!go) return;
+		const res = normResponse(await desktopApi.updateMod(idx));
+		if (res.ok) { await askConfirm({ title: '更新完成', message: '模组已更新，下次启动游戏生效。' }); onRefresh(); }
+		else await askConfirm({ title: '更新失败', message: res.message || '未知错误' });
+	}
+
 	function createModItemElement(mod, idx, onRefresh) {
 		const wrapper = document.createElement('div');
 		wrapper.innerHTML = renderModRow(mod, idx, sizeMB(mod.size));
@@ -50,6 +80,17 @@ export function createModsManager({ askConfirm }) {
 				onRefresh();
 			}
 		};
+
+		const updateBtn = item.querySelector('[data-a="update"]');
+		if (updateBtn) updateBtn.onclick = () => handleModUpdate(idx, mod, onRefresh);
+
+		// 有更新渠道的模组：渲染后异步检测远端版本，填色版本状态徽章
+		if (mod.hasUpdateChannel) {
+			const statusEl = item.querySelector('[data-mod-status]');
+			desktopApi.checkModUpdate(idx)
+				.then(res => { const r = normResponse(res); if (statusEl) applyModStatus(statusEl, r.ok ? (r.data || {}) : { status: 'error' }); })
+				.catch(() => { if (statusEl) applyModStatus(statusEl, { status: 'error' }); });
+		}
 
 		return item;
 	}

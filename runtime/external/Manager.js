@@ -135,7 +135,8 @@ function normalizeModMeta(raw) {
 			description: (typeof j.description === 'string' && j.description.trim()) ? j.description.trim() : null,
 			version: (typeof j.version === 'number' && isFinite(j.version)) ? j.version : null,
 			displayVersion: (j.displayVersion !== undefined && j.displayVersion !== null && String(j.displayVersion).trim())
-				? String(j.displayVersion).trim() : null
+				? String(j.displayVersion).trim() : null,
+				update: (j.update && typeof j.update === 'object' && !Array.isArray(j.update)) ? j.update : null
 		};
 	} catch (e) { return null; }
 }
@@ -278,7 +279,8 @@ function effectiveMods() {
 			size: m.size,
 			disabled: pendingToggle ? !m.disabled : m.disabled,
 			pendingToggle,
-			hasConfig: readModSchema(m.disk) !== null
+			hasConfig: readModSchema(m.disk) !== null,
+				hasUpdateChannel: !!(meta && meta.update && meta.update.source === 'github' && meta.update.repo)
 		};
 	});
 }
@@ -885,6 +887,81 @@ function cancelUpdate() {
 	return ok();
 }
 
+// ---- 模组更新渠道（mods.json.update）----
+// 检测单模组远端版本 → status: noChannel/noRelease/unknown/outdated/current/ahead
+async function checkModUpdate(idx) {
+	try {
+		const mods = effectiveMods();
+		const mod = mods[idx];
+		if (!mod) return fail('模组不存在', 'notfound');
+		const meta = readModMeta(mod.diskName);
+		const upd = meta && meta.update;
+		if (!upd || upd.source !== 'github' || !upd.repo) return ok({ status: 'noChannel' });
+		const localVer = (meta.version !== null && meta.version !== undefined) ? meta.version : null;
+		const ctrl = new AbortController();
+		const timer = setTimeout(() => ctrl.abort(), 12000);
+		try {
+			const relResp = await fetch(`https://api.github.com/repos/${upd.repo}/releases/latest`, { headers: ghHeaders(), signal: ctrl.signal });
+			if (relResp.status === 404) return ok({ status: 'noRelease' });
+			if (!relResp.ok) return fail(`GitHub 返回 ${relResp.status}`, 'http');
+			const rel = await relResp.json();
+			const assets = rel.assets || [];
+			let remoteVer = null, remoteDisplay = rel.tag_name || null;
+			const manifestAsset = (upd.manifest && assets.find(a => a.name === upd.manifest)) || assets.find(a => /\.update\.json$/i.test(a.name));
+			if (manifestAsset) {
+				try {
+					const m = await (await fetch(manifestAsset.browser_download_url, { headers: ghHeaders(), signal: ctrl.signal })).json();
+					if (m && typeof m.version === 'number') remoteVer = m.version;
+					if (m && m.displayVersion) remoteDisplay = String(m.displayVersion);
+				} catch (e) {}
+			}
+			if (remoteVer === null || localVer === null) return ok({ status: 'unknown', remoteDisplay });
+			const status = localVer < remoteVer ? 'outdated' : (localVer > remoteVer ? 'ahead' : 'current');
+			return ok({ status, localVer, remoteVer, remoteDisplay });
+		} finally { clearTimeout(timer); }
+	} catch (e) {
+		if (e.name === 'AbortError') return fail('检测超时', 'timeout');
+		return fail(e.message);
+	}
+}
+
+// 执行模组更新：下载远端 .asar → 复用导入管线覆盖（保留前缀/启停/config 不丢）
+async function updateMod(idx) {
+	try {
+		const mods = effectiveMods();
+		const mod = mods[idx];
+		if (!mod) return fail('模组不存在', 'notfound');
+		const meta = readModMeta(mod.diskName);
+		const upd = meta && meta.update;
+		if (!upd || upd.source !== 'github' || !upd.repo) return fail('该模组无更新渠道', 'noChannel');
+		const ctrl = new AbortController();
+		const timer = setTimeout(() => ctrl.abort(), 60000);
+		try {
+			const rel = await (await fetch(`https://api.github.com/repos/${upd.repo}/releases/latest`, { headers: ghHeaders(), signal: ctrl.signal })).json();
+			const assets = rel.assets || [];
+			let assetName = upd.asset || null;
+			if (!assetName) {
+				const mf = assets.find(a => /\.update\.json$/i.test(a.name));
+				if (mf) { try { const m = await (await fetch(mf.browser_download_url, { headers: ghHeaders(), signal: ctrl.signal })).json(); if (m && m.asset) assetName = String(m.asset); } catch (e) {} }
+			}
+			const asarAsset = (assetName && assets.find(a => a.name === assetName)) || assets.find(a => /\.asar$/i.test(a.name));
+			if (!asarAsset) return fail('远端 release 未找到 .asar 资产');
+			const dl = await fetch(asarAsset.browser_download_url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
+			if (!dl.ok) return fail(`下载失败 (HTTP ${dl.status})`);
+			const buf = Buffer.from(new Uint8Array(await dl.arrayBuffer()));
+			const r = stageAsarImport(asarAsset.name, buf);
+			if (r.status === 'invalid') return fail(r.message || '下载的模组文件无效');
+			if (r.status === 'added') return ok({ updated: true, restartRequired: true, note: '已作为新模组安装' });
+			const c = confirmPendingImport(r.token);
+			if (!c.ok) return c;
+			return ok({ updated: true, restartRequired: true, kind: r.kind });
+		} finally { clearTimeout(timer); }
+	} catch (e) {
+		if (e.name === 'AbortError') return fail('更新超时', 'timeout');
+		return fail(e.message);
+	}
+}
+
 function setup(deps) {
 	D = deps;
 	AdmZip = deps.admZip;
@@ -907,6 +984,8 @@ function setup(deps) {
 		'mgr:checkForUpdate': () => checkForUpdate(),
 		'mgr:downloadAndApplyUpdate': (e) => downloadAndApplyUpdate(e.sender),
 		'mgr:cancelUpdate': () => cancelUpdate(),
+		'mgr:checkModUpdate': (e, idx) => checkModUpdate(idx),
+		'mgr:updateMod': (e, idx) => updateMod(idx),
 
 		'mgr:autoBackup': (e, s) => autoBackup(s),
 		'mgr:getBackupsData': () => getBackupsData(),

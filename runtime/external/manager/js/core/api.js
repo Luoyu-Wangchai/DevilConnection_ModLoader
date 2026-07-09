@@ -30,6 +30,12 @@ export const desktopApi = {
 	cancelPendingImport(token) {
 		return window.desktopUI.cancelPendingImport(token);
 	},
+	checkModUpdate(idx) {
+		return window.desktopUI.checkModUpdate(idx);
+	},
+	updateMod(idx) {
+		return window.desktopUI.updateMod(idx);
+	},
 	getModConfig(idx) {
 		return window.desktopUI.getModConfig(idx);
 	},

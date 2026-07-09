@@ -46,6 +46,10 @@ export function renderModRow(mod, idx, sizeText) {
 	const versionBadge = mod.versionText
 		? `<span class="px-1.5 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-mono shrink-0">${escapeHtml(mod.versionText)}</span>`
 		: '';
+	// 版本状态徽章：无更新渠道→橘黄「无法自动更新」；有渠道→占位，前端异步检测后填色（检测到更新/已是最新）
+	const statusBadge = mod.hasUpdateChannel
+		? `<span data-mod-status class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 text-[10px] shrink-0">检测中…</span>`
+		: `<span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 text-[10px] shrink-0">无法自动更新</span>`;
 	const descLine = mod.hasMeta
 		? (mod.description ? `<div class="text-[10px] md:text-[11px] text-slate-400 mt-0.5 truncate">${escapeHtml(mod.description)}</div>` : '')
 		: `<div class="text-[10px] md:text-[11px] text-amber-600 mt-0.5 truncate">${NO_META_WARN}</div>`;
@@ -58,6 +62,7 @@ export function renderModRow(mod, idx, sizeText) {
 		<div class="flex items-center gap-2 min-w-0">
 			<span class="font-bold truncate text-slate-700 text-sm md:text-base ${mod.disabled ? 'opacity-50' : ''}">${escapeHtml(mod.displayName || mod.name)}</span>
 			${versionBadge}
+			${statusBadge}
 		</div>
 		${descLine}
 		<div class="text-[9px] md:text-[10px] text-slate-400 mt-0.5 uppercase tracking-tighter">
@@ -65,6 +70,7 @@ export function renderModRow(mod, idx, sizeText) {
 		</div>
 	</div>
 	<div class="flex gap-2 shrink-0 sm:opacity-0 group-hover:opacity-100">
+		${mod.hasUpdateChannel ? '<button data-a="update" class="mod-btn px-2 py-1 text-[10px] font-bold text-sky-600 hover:bg-white rounded border border-slate-100 transition-none">更新</button>' : ''}
 		${mod.hasConfig ? '<button data-a="config" class="mod-btn px-2 py-1 text-[10px] font-bold text-accent hover:bg-white rounded border border-slate-100 transition-none">配置</button>' : ''}
 		<button data-a="toggle" class="mod-btn px-2 py-1 text-[10px] font-bold ${mod.disabled ? 'text-emerald-600' : 'text-amber-600'} hover:bg-white rounded border border-slate-100 transition-none">${mod.disabled ? '启用' : '禁用'}</button>
 		<button data-a="rename" class="mod-btn px-2 py-1 text-[10px] font-bold text-indigo-600 hover:bg-white rounded border border-slate-100 transition-none">改名</button>

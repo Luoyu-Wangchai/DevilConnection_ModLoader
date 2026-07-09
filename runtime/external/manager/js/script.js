@@ -34,7 +34,7 @@ if (rebuildRepoLink) {
 }
 
 // 本 Fork 版本信息（版本号/仓库单一真源 = version.json，经 Manager.js 读出后注入 UI）
-let appInfo = { displayVersion: 'RV1.2.3', repoUrl: 'https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader' };
+let appInfo = { displayVersion: 'RV1.2.4', repoUrl: 'https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader' };
 async function initAppInfo() {
 	try {
 		const res = normResponse(await desktopApi.getAppInfo());
