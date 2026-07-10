@@ -19,6 +19,7 @@ public sealed class ModLoaderInstaller
     private string ModCoreJs => Path.Combine(ResourcesDir, "ModCore.js");
     private string ManagerDir => Path.Combine(ResourcesDir, "manager");
     private string VersionJson => Path.Combine(ResourcesDir, "version.json");
+    private string InsideModsDir => Path.Combine(ResourcesDir, "insidemods");
 
     public ModLoaderInstaller(string gameRootOrExe)
     {
@@ -165,6 +166,8 @@ public sealed class ModLoaderInstaller
             CopyDir(Path.Combine(externalDir, "manager"), ManagerDir);
             string versionSrc = Path.Combine(externalDir, "version.json");
             if (File.Exists(versionSrc)) File.Copy(versionSrc, VersionJson, true);
+            string insideSrc = Path.Combine(externalDir, "insidemods");
+            if (Directory.Exists(insideSrc)) CopyDir(insideSrc, InsideModsDir);
 
             log("完成。");
             return status == InstallStatus.Installed ? "ModLoader 已更新。" : "ModLoader 安装成功。";
@@ -200,6 +203,7 @@ public sealed class ModLoaderInstaller
         TryDelete(ManagerJs);
         TryDelete(ModCoreJs);
         TryDeleteDir(ManagerDir);
+        TryDeleteDir(InsideModsDir);
         TryDelete(VersionJson);
         TryDelete(Path.Combine(ResourcesDir, "mod_loader.log"));
 

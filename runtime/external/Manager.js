@@ -23,12 +23,13 @@ function readVersionInfo() {
 			return {
 				version: String(j.version || '0.0.0'),
 				beta: !!j.beta,
+				loaderVersion: (typeof j.loaderVersion === 'number' && isFinite(j.loaderVersion)) ? j.loaderVersion : null,
 				repo: String(j.repo || DEFAULT_REPO),
 				name: String(j.name || 'DevilConnection ModLoader')
 			};
 		}
 	} catch (e) {}
-	return { version: '0.0.0', beta: false, repo: DEFAULT_REPO, name: 'DevilConnection ModLoader' };
+	return { version: '0.0.0', beta: false, loaderVersion: null, repo: DEFAULT_REPO, name: 'DevilConnection ModLoader' };
 }
 function displayVersion(v) { return (v.beta ? 'BRV' : 'RV') + v.version; }
 
@@ -237,6 +238,29 @@ function saveModConfig(idx, values) {
 	} catch (e) { return fail(e.message); }
 }
 
+// 内置模组（resources/insidemods/*.asar）：不显示在模组列表，但进依赖图（可被普通模组 requires/检测）
+function insideModsForResolve() {
+	const out = [];
+	if (!ModCore) return out;
+	try {
+		const dir = path.join(D.resourcesPath, 'insidemods');
+		if (!fs.existsSync(dir)) return out;
+		for (const n of fs.readdirSync(dir)) {
+			if (n.startsWith('.') || !n.toLowerCase().endsWith('.asar')) continue;
+			try { if (!fs.statSync(path.join(dir, n)).isFile()) continue; } catch (e) { continue; }
+			let meta = {};
+			try {
+				const raw = ModCore.readAsarInner(fs, path.join(dir, n), 'mods.json');
+				if (raw) meta = ModCore.metaForResolve(JSON.parse(raw.toString('utf8')));
+			} catch (e) {}
+			const bare = n.replace(/^\d+_/, '').replace(/\.asar$/i, '');
+			out.push({ id: meta.id || bare, canonical: 'insidemods/' + n, disabled: false, version: meta.version, deps: meta.deps });
+		}
+		out.sort((a, b) => a.canonical.localeCompare(b.canonical, undefined, { numeric: true, sensitivity: 'base' }));
+	} catch (e) {}
+	return out;
+}
+
 function effectiveMods() {
 	const cfg = readModsConfig();
 	const entries = scanDiskMods();
@@ -270,14 +294,15 @@ function effectiveMods() {
 			diagnostics: { status: 'ok', problems: [] }
 		};
 	});
-	// 特性①：依赖/冲突诊断（loaderVersion 传 null，minLoaderVersion 门控属特性③，暂不触发）
+	// 特性①+③：依赖/冲突诊断 + minLoaderVersion 门控（loaderVersion 来自 version.json 的独立递增整数）
+	// 内置模组前置进依赖图（加载顺序在所有普通模组之前），但不出现在返回列表里
 	if (ModCore && items.length) {
 		try {
-			const input = items.map(it => {
+			const input = insideModsForResolve().concat(items.map(it => {
 				const meta = metaByName.get(it.name);
 				return { id: it.modId, canonical: it.name, disabled: it.disabled, version: it.versionNum, minLoaderVersion: meta && meta.minLoaderVersion, deps: meta && meta.dependencies };
-			});
-			const res = ModCore.resolveMods(input, null);
+			}));
+			const res = ModCore.resolveMods(input, readVersionInfo().loaderVersion);
 			for (const it of items) it.diagnostics = res.diagnostics[it.name] || { status: 'ok', problems: [] };
 		} catch (e) {}
 	}
@@ -351,16 +376,18 @@ function moveModTo(oldIndex, newIndex) {
 }
 
 // 特性①：一键修复顺序（对 before/after 约束拓扑排序，只重写 order；有环报错）
+// 内置模组参与拓扑（恒在最前）但不写进 order（order 只管 plugins）
 function autoFixOrder() {
 	try {
 		if (!ModCore) return fail('依赖解析模块不可用');
 		const mods = effectiveMods();
-		const input = mods.map(m => { const meta = readModMeta(m.diskName); return { id: m.modId, canonical: m.name, disabled: m.disabled, deps: meta && meta.dependencies }; });
+		const names = new Set(mods.map(m => m.name));
+		const input = insideModsForResolve().concat(mods.map(m => { const meta = readModMeta(m.diskName); return { id: m.modId, canonical: m.name, disabled: m.disabled, deps: meta && meta.dependencies }; }));
 		const enabledOrder = ModCore.suggestOrder(input);
 		if (!enabledOrder) return fail('依赖成环，无法自动排序', 'cycle');
 		const disabled = mods.filter(m => m.disabled).map(m => m.name);
 		const cfg = readModsConfig();
-		cfg.order = enabledOrder.concat(disabled);
+		cfg.order = enabledOrder.filter(n => names.has(n)).concat(disabled);
 		writeModsConfig(cfg);
 		return ok({ restartRequired: true, order: cfg.order });
 	} catch (e) { return fail(e.message); }
@@ -840,7 +867,8 @@ async function downloadAndApplyUpdate(sender, betaEnabled) {
 		for (const e of entries) {
 			const rel = String(e.entryName || '').replace(/\\/g, '/').replace(/^\/+/, '');
 			if (!rel || rel.split('/').some(seg => seg === '..' || seg === '')) continue;
-			if (/\.asar$/i.test(rel)) continue;
+			// 根级 .asar（壳）绝不经外置档覆盖；insidemods/ 子目录的内置模组 asar 放行（落盘走 original-fs）
+			if (/\.asar$/i.test(rel) && !rel.includes('/')) continue;
 			files.push({ rel, data: e.getData() });
 		}
 		if (!files.length) return fail('更新包为空或不含可应用文件', 'badzip');

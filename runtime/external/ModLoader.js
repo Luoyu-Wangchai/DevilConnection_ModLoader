@@ -9,6 +9,7 @@ let ofs;
 try { ofs = require('original-fs'); } catch (e) { ofs = fs; }
 
 const PLUGIN_DIR_NAME = 'plugins';
+const INSIDE_DIR_NAME = 'insidemods';
 const CACHE_SUB_DIR = 'mod_loader_cache';
 const ENV_FILE_NAME = '.env';
 const ASAR_EXT = '.asar';
@@ -182,6 +183,7 @@ const PluginManager = {
 
 	init() {
 		this.pluginDir = path.join(this.resourcesPath, PLUGIN_DIR_NAME);
+		this.insideDir = path.join(this.resourcesPath, INSIDE_DIR_NAME);
 		this.cacheDir = path.join(Env.getUserDataPath(), CACHE_SUB_DIR);
 
 		Logger.init(this.resourcesPath);
@@ -199,6 +201,18 @@ const PluginManager = {
 
 		try {
 			const cfg = this.loadConfigAndApplyPending();
+
+			// 内置模组（resources/insidemods/*.asar）：强制加载、绝对第一优先级、不进列表/order/.disable
+			let inside = [];
+			try {
+				if (O.existsSync(this.insideDir)) {
+					inside = O.readdirSync(this.insideDir).filter(name => {
+						if (name.startsWith('.')) return false;
+						if (!name.toLowerCase().endsWith(ASAR_EXT)) return false;
+						try { return ofs.statSync(path.join(this.insideDir, name)).isFile(); } catch (e) { return false; }
+					}).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+				}
+			} catch (e) { Logger.error('扫描内置模组失败', e); }
 
 			const disk = O.readdirSync(this.pluginDir).filter(name => {
 				if (name.startsWith('.')) return false;
@@ -218,12 +232,13 @@ const PluginManager = {
 				.forEach(n => ordered.push(n));
 
 			// 特性①：依赖/冲突 gate —— blocked 的 mod 不注入（文件留盘，只跳过并记日志）
+			// 内置模组进依赖图（可被 requires/检测），但自身永不被 gate
 			this.skipped = [];
 			if (ModCore) {
 				try {
 					const bare = (n) => n.replace(/^\d+_/, '').replace(/\.asar$/i, '');
-					const readMeta = (canon) => {
-						const raw = ModCore.readAsarInner(ofs, path.join(this.pluginDir, canon), 'mods.json');
+					const readMeta = (dir, canon) => {
+						const raw = ModCore.readAsarInner(ofs, path.join(dir, canon), 'mods.json');
 						if (!raw) return {};
 						try { return ModCore.metaForResolve(JSON.parse(raw.toString('utf8'))); } catch (e) { return {}; }
 					};
@@ -231,9 +246,15 @@ const PluginManager = {
 						.filter(n => n.toLowerCase().endsWith(ASAR_EXT + '.disable'))
 						.map(n => n.slice(0, -('.disable'.length)));
 					const input = [];
-					for (const n of ordered) { const meta = readMeta(n); input.push({ id: meta.id || bare(n), canonical: n, disabled: false, version: meta.version, minLoaderVersion: meta.minLoaderVersion, deps: meta.deps }); }
-					for (const n of disabledNames) { const meta = readMeta(n); input.push({ id: meta.id || bare(n), canonical: n, disabled: true, version: meta.version, deps: meta.deps }); }
-					const { diagnostics } = ModCore.resolveMods(input, null);
+					for (const n of inside) { const meta = readMeta(this.insideDir, n); input.push({ id: meta.id || bare(n), canonical: INSIDE_DIR_NAME + '/' + n, disabled: false, version: meta.version, deps: meta.deps }); }
+					for (const n of ordered) { const meta = readMeta(this.pluginDir, n); input.push({ id: meta.id || bare(n), canonical: n, disabled: false, version: meta.version, minLoaderVersion: meta.minLoaderVersion, deps: meta.deps }); }
+					for (const n of disabledNames) { const meta = readMeta(this.pluginDir, n); input.push({ id: meta.id || bare(n), canonical: n, disabled: true, version: meta.version, deps: meta.deps }); }
+					let loaderVer = null;
+					try {
+						const vj = JSON.parse(O.readFileSync(path.join(this.pluginDir, '..', 'version.json'), 'utf8'));
+						if (typeof vj.loaderVersion === 'number' && isFinite(vj.loaderVersion)) loaderVer = vj.loaderVersion;
+					} catch (eV) {}
+					const { diagnostics } = ModCore.resolveMods(input, loaderVer);
 					const kept = [];
 					for (const n of ordered) {
 						if (diagnostics[n] && diagnostics[n].status === 'blocked') { this.skipped.push(n); Logger.info(`已跳过(依赖/冲突未满足): ${n}`); }
@@ -243,12 +264,16 @@ const PluginManager = {
 				} catch (e) { Logger.error('依赖 gate 失败(全部照常加载)', e); }
 			}
 
-			this.plugins = ordered.map(n => path.join(this.pluginDir, n));
+			this.plugins = inside.map(n => path.join(this.insideDir, n))
+				.concat(ordered.map(n => path.join(this.pluginDir, n)));
 			const body = path.join(this.pluginDir, TARGET_ASAR_BODY);
 			if (O.existsSync(body)) this.plugins.push(body);
 
-			Logger.info(`扫描完成, 已加载 ${this.plugins.length} 个模组.`);
-			this.plugins.forEach((p, i) => Logger.info(`优先级 [${i + 1}]: ${path.basename(p)}`));
+			Logger.info(`扫描完成, 已加载 ${this.plugins.length} 个模组 (含内置 ${inside.length} 个).`);
+			this.plugins.forEach((p, i) => {
+				const isInside = inside.length && i < inside.length;
+				Logger.info(`优先级 [${isInside ? '内置' : (i + 1 - inside.length)}]: ${path.basename(p)}`);
+			});
 		} catch (e) { Logger.error('初始化失败', e); }
 	},
 
@@ -382,6 +407,19 @@ const PluginManager = {
 					const tryPath = path.join(plugin, platformRel);
 					if (O.existsSync(tryPath)) { result = this.getDecodedCachePath(tryPath); break; }
 				}
+				// 图片在全部模组与原版中都不存在（常见于模组被删但存档仍引用其图片）：
+				// 兜底为占位图（由内置模组提供），避免游戏弹「画像ファイルが見つかりません」
+				if (!result && /\.(png|jpe?g|webp|gif|bmp)$/i.test(rel)) {
+					const fb = path.join('data', 'image', 'dcml_404.png');
+					for (const plugin of this.plugins) {
+						const tryFb = path.join(plugin, fb);
+						if (O.existsSync(tryFb)) {
+							result = tryFb;
+							Logger.info(`图片缺失，已用占位图替代: ${rel}`);
+							break;
+						}
+					}
+				}
 			}
 		} catch (e) { Logger.error(`路径解析异常: ${target}`, e); }
 
@@ -408,6 +446,31 @@ const ScriptInjection = {
 			name: 'DCModLoader',
 			code: `(function(){console.log('[ModLoader] 内置 Hook: DCModLoader');try{${this.builtIn}}catch(e){console.error('[ModLoader] 内置 Hook 错误',e);}})();`
 		});
+		// 已安装模组清单注入主世界（供模组工坊等展示全部模组；排除游戏本体与内置模组）
+		try {
+			const modlist = [];
+			PluginManager.plugins.forEach(plugin => {
+				const base = path.basename(plugin);
+				if (base.toLowerCase() === TARGET_ASAR_BODY) return;
+				if (PluginManager.norm(plugin).startsWith(PluginManager.norm(PluginManager.insideDir))) return;
+				let meta = null;
+				if (ModCore) {
+					try {
+						const raw = ModCore.readAsarInner(ofs, plugin, 'mods.json');
+						if (raw) meta = JSON.parse(raw.toString('utf8'));
+					} catch (e) {}
+				}
+				modlist.push({
+					file: base,
+					bare: base.replace(/^\d+_/, '').replace(/\.asar$/i, ''),
+					name: (meta && meta.name) || null,
+					description: (meta && meta.description) || null,
+					displayVersion: (meta && (meta.displayVersion || (meta.version != null ? 'v' + meta.version : null))) || null,
+					hasMeta: !!meta
+				});
+			});
+			this.scripts.push({ name: 'DCML_ModList', code: 'window.__DCML_MODLIST = ' + JSON.stringify(modlist) + ';' });
+		} catch (e) { Logger.error('构建模组清单失败', e); }
 		PluginManager.plugins.forEach(plugin => {
 			const hookPath = path.join(plugin, 'hook.js');
 			if (!O.existsSync(hookPath)) return;

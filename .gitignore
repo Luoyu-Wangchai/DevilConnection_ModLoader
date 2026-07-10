@@ -11,3 +11,7 @@ publish/
 .idea/
 .vscode/
 *.user
+
+# Build products
+build/out/
+build/dist/
