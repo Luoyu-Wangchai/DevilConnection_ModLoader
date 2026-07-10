@@ -34,7 +34,7 @@ if (rebuildRepoLink) {
 }
 
 // 本 Fork 版本信息（版本号/仓库单一真源 = version.json，经 Manager.js 读出后注入 UI）
-let appInfo = { displayVersion: 'RV1.2.6', repoUrl: 'https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader' };
+let appInfo = { displayVersion: 'RV1.2.7', repoUrl: 'https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader' };
 async function initAppInfo() {
 	try {
 		const res = normResponse(await desktopApi.getAppInfo());
@@ -48,7 +48,72 @@ async function initAppInfo() {
 	});
 }
 
-// 检查更新：去 GitHub release 比对版本
+// 加载器本地设置（Beta 更新通道开关等），与备份设置同款 localStorage 持久化
+const LOADER_SETTINGS_KEY = 'devil_connection_loader_settings_v1';
+function loadLoaderSettings() {
+	try {
+		const j = JSON.parse(localStorage.getItem(LOADER_SETTINGS_KEY) || '{}');
+		return { beta_updates: !!j.beta_updates };
+	} catch (e) { return { beta_updates: false }; }
+}
+function saveLoaderSettings(s) {
+	try { localStorage.setItem(LOADER_SETTINGS_KEY, JSON.stringify(s)); } catch (e) {}
+}
+const loaderSettings = loadLoaderSettings();
+
+const betaToggle = document.getElementById('beta-updates-toggle');
+function applyBetaToggleUI(enabled) {
+	if (!betaToggle) return;
+	const isEnabled = !!enabled;
+	const dot = betaToggle.querySelector('.switch-dot');
+	betaToggle.classList.toggle('switch-on', isEnabled);
+	betaToggle.classList.toggle('switch-off', !isEnabled);
+	dot.classList.toggle('switch-dot-on', isEnabled);
+	dot.classList.toggle('switch-dot-off', !isEnabled);
+}
+if (betaToggle) {
+	applyBetaToggleUI(loaderSettings.beta_updates);
+	betaToggle.onclick = () => {
+		loaderSettings.beta_updates = !loaderSettings.beta_updates;
+		saveLoaderSettings(loaderSettings);
+		applyBetaToggleUI(loaderSettings.beta_updates);
+	};
+}
+
+// 一键自动更新：进度弹窗 + 可取消；成功后主进程会自动重启加载器
+async function runAutoUpdate() {
+	const wrap = document.getElementById('update-modal');
+	const text = document.getElementById('update-modal-text');
+	const bar = document.getElementById('update-modal-bar');
+	const pctEl = document.getElementById('update-modal-pct');
+	const btnCancel = document.getElementById('update-modal-cancel');
+	if (!wrap) return;
+	wrap.classList.remove('hidden');
+	text.textContent = '准备中...';
+	bar.style.width = '0%';
+	pctEl.textContent = '';
+	btnCancel.classList.remove('hidden');
+	btnCancel.onclick = () => { desktopApi.cancelUpdate(); };
+	const unsub = desktopApi.onUpdateProgress((p) => {
+		if (!p) return;
+		if (p.text) text.textContent = p.text;
+		if (p.pct != null) { bar.style.width = p.pct + '%'; pctEl.textContent = p.pct + '%'; }
+		else if (p.received) { pctEl.textContent = (p.received / 1024 / 1024).toFixed(1) + ' MB'; }
+		if (p.phase === 'done') btnCancel.classList.add('hidden');
+	});
+	const res = normResponse(await desktopApi.downloadAndApplyUpdate(loaderSettings.beta_updates));
+	if (unsub) unsub();
+	if (!res.ok) {
+		wrap.classList.add('hidden');
+		await askConfirm({ title: '更新失败', message: res.message || '未知错误，请稍后重试或前往 GitHub 手动更新。' });
+		return;
+	}
+	text.textContent = '更新完成，加载器即将自动重启...';
+	bar.style.width = '100%';
+	pctEl.textContent = '100%';
+}
+
+// 检查更新：去 GitHub release 比对版本（按 Beta 开关选通道），可自动更新则一键更新，否则跳手动下载
 const cardCheckUpdate = document.getElementById('card-check-update');
 if (cardCheckUpdate) {
 	const label = document.getElementById('check-update-label');
@@ -60,7 +125,7 @@ if (cardCheckUpdate) {
 		const restore = () => { checking = false; if (label) label.textContent = '检查更新'; if (icon) icon.classList.remove('animate-spin'); };
 		if (label) label.textContent = '正在检查...';
 		if (icon) icon.classList.add('animate-spin');
-		const res = normResponse(await desktopApi.checkForUpdate());
+		const res = normResponse(await desktopApi.checkForUpdate(loaderSettings.beta_updates));
 		restore();
 		if (!res.ok) {
 			await askConfirm({ title: '检查更新失败', message: res.message || '无法连接 GitHub，请检查网络后重试。' });
@@ -68,11 +133,22 @@ if (cardCheckUpdate) {
 		}
 		const d = res.data || {};
 		if (d.hasUpdate && d.latest) {
-			const go = await askConfirm({
-				title: `发现新版本 ${d.latest}`,
-				message: `当前 ${d.current}，最新 ${d.latest}。是否前往 GitHub 下载最新安装器手动更新？`
-			});
-			if (go) desktopApi.openExternal(d.url || appInfo.repoUrl + '/releases');
+			const head = d.reason === 'leaveBeta'
+				? `当前 ${d.current} 为 Beta 测试版，已关闭 Beta 更新通道，将回到最新稳定版 ${d.latest}。`
+				: `当前 ${d.current}，最新 ${d.latest}。`;
+			if (d.canAutoUpdate) {
+				const go = await askConfirm({
+					title: `发现新版本 ${d.latest}`,
+					message: head + ` 是否立即自动更新？完成后加载器将自动重启（游戏若在运行也会一并重启）。`
+				});
+				if (go) runAutoUpdate();
+			} else {
+				const go = await askConfirm({
+					title: `发现新版本 ${d.latest}`,
+					message: head + ` 该版本未提供自动更新包，是否前往 GitHub 下载安装器手动更新？`
+				});
+				if (go) desktopApi.openExternal(d.url || appInfo.repoUrl + '/releases');
+			}
 		} else {
 			await askConfirm({
 				title: '已是最新版本',

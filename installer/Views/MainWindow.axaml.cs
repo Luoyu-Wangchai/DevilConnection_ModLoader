@@ -53,11 +53,17 @@ public partial class MainWindow : Window
         Log($"已定位游戏：{_inst.GameRoot}");
     }
 
-    // 模组管理器版本检测：显示已装版本 vs 安装器内置版本，并给出升级/重装提示（版本号来自 version.json，显示加 RV 前缀）
+    // 模组管理器版本检测：显示已装版本 vs 安装器内置版本，并给出升级/重装提示
+    // （版本号来自 version.json，规范串 B 开头 = Beta 版，显示 BRV 前缀；否则 RV）
+    private static string DisplayVer(string? raw) =>
+        raw is null ? "未知"
+        : raw.StartsWith("B", StringComparison.OrdinalIgnoreCase) ? "BRV" + raw.Substring(1)
+        : "RV" + raw;
+
     private void UpdateVersionInfo(InstallStatus status)
     {
         string? bundledRaw = ModLoaderInstaller.GetBundledVersion();
-        string bundled = bundledRaw is null ? "未知" : "RV" + bundledRaw;
+        string bundled = DisplayVer(bundledRaw);
         if (_inst is not null && status == InstallStatus.Installed)
         {
             string? installedRaw = _inst.GetInstalledVersion();
@@ -71,7 +77,7 @@ public partial class MainWindow : Window
                 string rel = cmp < 0 ? "点「安装 / 更新」可升级"
                            : cmp > 0 ? "已安装版本更新，内置为旧版"
                            : "已是最新版本";
-                VersionText.Text = $"已安装 RV{installedRaw} · 安装器内置 {bundled} —— {rel}";
+                VersionText.Text = $"已安装 {DisplayVer(installedRaw)} · 安装器内置 {bundled} —— {rel}";
             }
         }
         else if (status == InstallStatus.NotInstalled)

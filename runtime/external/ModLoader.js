@@ -27,6 +27,9 @@ const BLACKLIST = new Set([
 	'config', 'version.json', '.update'
 ]);
 
+let ModCore = null;
+try { ModCore = require('./ModCore.js'); } catch (e) {}
+
 const O = {
 	readFileSync: fs.readFileSync,
 	readFile: fs.readFile,
@@ -208,11 +211,37 @@ const PluginManager = {
 				} catch (e) { return false; }
 			});
 
-			const ordered = [];
+			let ordered = [];
 			for (const n of (cfg.order || [])) if (disk.includes(n) && !ordered.includes(n)) ordered.push(n);
 			disk.filter(n => !ordered.includes(n))
 				.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
 				.forEach(n => ordered.push(n));
+
+			// 特性①：依赖/冲突 gate —— blocked 的 mod 不注入（文件留盘，只跳过并记日志）
+			this.skipped = [];
+			if (ModCore) {
+				try {
+					const bare = (n) => n.replace(/^\d+_/, '').replace(/\.asar$/i, '');
+					const readMeta = (canon) => {
+						const raw = ModCore.readAsarInner(ofs, path.join(this.pluginDir, canon), 'mods.json');
+						if (!raw) return {};
+						try { return ModCore.metaForResolve(JSON.parse(raw.toString('utf8'))); } catch (e) { return {}; }
+					};
+					const disabledNames = O.readdirSync(this.pluginDir)
+						.filter(n => n.toLowerCase().endsWith(ASAR_EXT + '.disable'))
+						.map(n => n.slice(0, -('.disable'.length)));
+					const input = [];
+					for (const n of ordered) { const meta = readMeta(n); input.push({ id: meta.id || bare(n), canonical: n, disabled: false, version: meta.version, minLoaderVersion: meta.minLoaderVersion, deps: meta.deps }); }
+					for (const n of disabledNames) { const meta = readMeta(n); input.push({ id: meta.id || bare(n), canonical: n, disabled: true, version: meta.version, deps: meta.deps }); }
+					const { diagnostics } = ModCore.resolveMods(input, null);
+					const kept = [];
+					for (const n of ordered) {
+						if (diagnostics[n] && diagnostics[n].status === 'blocked') { this.skipped.push(n); Logger.info(`已跳过(依赖/冲突未满足): ${n}`); }
+						else kept.push(n);
+					}
+					ordered = kept;
+				} catch (e) { Logger.error('依赖 gate 失败(全部照常加载)', e); }
+			}
 
 			this.plugins = ordered.map(n => path.join(this.pluginDir, n));
 			const body = path.join(this.pluginDir, TARGET_ASAR_BODY);
@@ -227,9 +256,12 @@ const PluginManager = {
 
 	loadConfigAndApplyPending() {
 		let cfg = { order: [], disabled: [], toggles: [], deleted: [], names: {} };
+		let hadLegacy = false;
 		try {
 			if (O.existsSync(this.configPath())) {
-				cfg = Object.assign(cfg, JSON.parse(O.readFileSync(this.configPath(), 'utf8')));
+				const raw = JSON.parse(O.readFileSync(this.configPath(), 'utf8'));
+				cfg = Object.assign(cfg, raw);
+				hadLegacy = !!((raw.disabled && raw.disabled.length) || (raw.toggles && raw.toggles.length) || (raw.deleted && raw.deleted.length) || (raw.names && Object.keys(raw.names).length));
 			}
 		} catch (e) { Logger.error('读取 mods.config.json 失败', e); }
 
@@ -281,8 +313,11 @@ const PluginManager = {
 			dirty = true;
 		}
 
-		if (dirty) {
-			try { O.writeFileSync(this.configPath(), JSON.stringify(cfg, null, 2), 'utf8'); } catch (e) {}
+		// §15：精简写回，只保留 order（过滤掉磁盘上已不存在的项）；names 直接丢弃
+		if (dirty || hadLegacy) {
+			cfg.order = (cfg.order || []).filter(n =>
+				ofs.existsSync(path.join(this.pluginDir, n)) || ofs.existsSync(path.join(this.pluginDir, n + '.disable')));
+			try { O.writeFileSync(this.configPath(), JSON.stringify({ order: cfg.order }, null, 2), 'utf8'); Logger.info('mods.config.json 已精简为只含 order'); } catch (e) {}
 		}
 		return cfg;
 	},

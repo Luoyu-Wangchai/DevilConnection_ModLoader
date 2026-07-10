@@ -11,10 +11,11 @@ contextBridge.exposeInMainWorld('desktopUI', {
 	launchGame: () => invoke('app:launchGame'),
 
 	getModsData: () => invoke('mgr:getModsData'),
+	isGameRunning: () => invoke('mgr:isGameRunning'),
 	toggleModDisabled: (idx) => invoke('mgr:toggleModDisabled', idx),
-	renameMod: (idx, name) => invoke('mgr:renameMod', idx, name),
 	deleteMod: (idx) => invoke('mgr:deleteMod', idx),
 	moveModTo: (oldIndex, newIndex) => invoke('mgr:moveModTo', oldIndex, newIndex),
+	autoFixOrder: () => invoke('mgr:autoFixOrder'),
 	importModFromBuffer: (fileName, bytes) => invoke('mgr:importModFromBuffer', fileName, bytes),
 	confirmPendingImport: (token) => invoke('mgr:confirmPendingImport', token),
 	cancelPendingImport: (token) => invoke('mgr:cancelPendingImport', token),
@@ -25,7 +26,14 @@ contextBridge.exposeInMainWorld('desktopUI', {
 	openModsFolder: () => invoke('mgr:openModsFolder'),
 	openExternal: (url) => invoke('mgr:openExternal', url),
 	getAppInfo: () => invoke('mgr:getAppInfo'),
-	checkForUpdate: () => invoke('mgr:checkForUpdate'),
+	checkForUpdate: (beta) => invoke('mgr:checkForUpdate', beta),
+	downloadAndApplyUpdate: (beta) => invoke('mgr:downloadAndApplyUpdate', beta),
+	cancelUpdate: () => invoke('mgr:cancelUpdate'),
+	onUpdateProgress(callback) {
+		const listener = (_e, payload) => callback(payload);
+		ipcRenderer.on('mgr:updateProgress', listener);
+		return () => ipcRenderer.removeListener('mgr:updateProgress', listener);
+	},
 
 	autoBackup: (settings) => invoke('mgr:autoBackup', settings),
 	getBackupsData: () => invoke('mgr:getBackupsData'),

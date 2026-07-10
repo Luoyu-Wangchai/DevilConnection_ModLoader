@@ -24,12 +24,11 @@ function steamBypassEnabled() {
 	try {
 		const ofs = require('original-fs');
 		const dir = path.join(process.resourcesPath, 'plugins');
-		let disabled = [];
-		try { disabled = (JSON.parse(ofs.readFileSync(path.join(dir, 'mods.config.json'), 'utf8')).disabled) || []; } catch (e) {}
+		// §15：启停=.disable 后缀，不再读 config.disabled。只认启用态的 dc_steambypass.asar（.asar.disable 不以 .asar 结尾故不匹配）
 		return ofs.readdirSync(dir).some(function (n) {
 			if (!/\.asar$/i.test(n)) return false;
 			const bare = n.replace(/^\d+_/, '').replace(/\.asar$/i, '');
-			return bare === 'dc_steambypass' && disabled.indexOf(n) === -1;
+			return bare === 'dc_steambypass';
 		});
 	} catch (e) { return false; }
 }
@@ -84,6 +83,7 @@ try {
 			admZip: require('adm-zip'),
 			nativeFS: ML && ML.nativeFS,
 			getDialogParent: activeWindow,
+			isGameRunning: () => !!(gameWindow && !gameWindow.isDestroyed()),
 			resourcesPath: process.resourcesPath
 		});
 	}

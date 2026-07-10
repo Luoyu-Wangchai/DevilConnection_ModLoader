@@ -5,13 +5,15 @@ const path = require('path');
 
 let D = null;
 let AdmZip = null;
+let ModCore = null;
+try { ModCore = require('./ModCore.js'); } catch (e) {}
 
 const GAME_BODY = 'app.bak.asar';
 const DISABLE_EXT = '.disable';
 const MOD_META_FILE = 'mods.json';
 
-// 版本号单一真源 = resources/version.json（安装器部署）。RV 只是显示前缀，真正版本号是里面的 version(如 1.2.1)。
-const VERSION_PREFIX = 'RV';
+// 版本号单一真源 = resources/version.json（安装器部署）。RV/BRV 只是显示前缀，真正版本号是里面的 version(如 1.2.8 / 1.2.8-3CB3895E54)。
+// beta: true 表示当前装的是 Beta 测试版（显示 BRV 前缀，更新通道见 checkForUpdate）。
 const DEFAULT_REPO = 'Luoyu-Wangchai/DevilConnection_ModLoader';
 function readVersionInfo() {
 	try {
@@ -20,14 +22,15 @@ function readVersionInfo() {
 			const j = JSON.parse(fs.readFileSync(p, 'utf8'));
 			return {
 				version: String(j.version || '0.0.0'),
+				beta: !!j.beta,
 				repo: String(j.repo || DEFAULT_REPO),
 				name: String(j.name || 'DevilConnection ModLoader')
 			};
 		}
 	} catch (e) {}
-	return { version: '0.0.0', repo: DEFAULT_REPO, name: 'DevilConnection ModLoader' };
+	return { version: '0.0.0', beta: false, repo: DEFAULT_REPO, name: 'DevilConnection ModLoader' };
 }
-function displayVersion(v) { return VERSION_PREFIX + v; }
+function displayVersion(v) { return (v.beta ? 'BRV' : 'RV') + v.version; }
 
 function pluginsDir() { return path.join(D.resourcesPath, 'plugins'); }
 function gameRoot() { return path.resolve(D.resourcesPath, '..'); }
@@ -57,23 +60,20 @@ function sizeText(bytes) { return (Number(bytes || 0) / 1024 / 1024).toFixed(2) 
 
 function modsConfigPath() { return path.join(pluginsDir(), 'mods.config.json'); }
 
+// §15：mods.config.json 精简为只剩 order（启停=.disable 后缀、显示名=mods.json.name）。旧字段迁移由 ModLoader.init 一次性做。
 function readModsConfig() {
-	const cfg = { order: [], disabled: [], toggles: [], deleted: [], names: {} };
+	const cfg = { order: [] };
 	try {
 		if (fs.existsSync(modsConfigPath())) {
 			const j = JSON.parse(fs.readFileSync(modsConfigPath(), 'utf8'));
 			cfg.order = Array.isArray(j.order) ? j.order : [];
-			cfg.disabled = Array.isArray(j.disabled) ? j.disabled : [];
-			cfg.toggles = Array.isArray(j.toggles) ? j.toggles : [];
-			cfg.deleted = Array.isArray(j.deleted) ? j.deleted : [];
-			cfg.names = (j.names && typeof j.names === 'object') ? j.names : {};
 		}
 	} catch (e) {}
 	return cfg;
 }
 function writeModsConfig(cfg) {
 	ensureDir(pluginsDir());
-	fs.writeFileSync(modsConfigPath(), JSON.stringify(cfg, null, 2), 'utf8');
+	fs.writeFileSync(modsConfigPath(), JSON.stringify({ order: cfg.order || [] }, null, 2), 'utf8');
 }
 function sanitizeName(name) {
 	return String(name).replace(/[\\/:*?"<>|]/g, '').replace(/^\.+/, '').trim() || 'mod';
@@ -85,21 +85,6 @@ function deriveDisplay(name) {
 	return s || name;
 }
 
-function migrateLegacyDisabled() {
-	const cfg = readModsConfig();
-	if (!cfg.disabled.length) return;
-	const remain = [];
-	for (const name of cfg.disabled) {
-		const full = path.join(pluginsDir(), name);
-		try {
-			if (name.toLowerCase().endsWith('.asar') && fs.existsSync(full) && fs.statSync(full).isFile()) {
-				fs.renameSync(full, full + DISABLE_EXT);
-			}
-		} catch (e) { remain.push(name); }
-	}
-	cfg.disabled = remain;
-	writeModsConfig(cfg);
-}
 
 function scanDiskMods() {
 	const dir = pluginsDir();
@@ -136,8 +121,11 @@ function normalizeModMeta(raw) {
 			version: (typeof j.version === 'number' && isFinite(j.version)) ? j.version : null,
 			displayVersion: (j.displayVersion !== undefined && j.displayVersion !== null && String(j.displayVersion).trim())
 				? String(j.displayVersion).trim() : null,
-				update: (j.update && typeof j.update === 'object' && !Array.isArray(j.update)) ? j.update : null
-		};
+				update: (j.update && typeof j.update === 'object' && !Array.isArray(j.update)) ? j.update : null,
+				id: (typeof j.id === 'string' && /^[a-z0-9_-]+$/i.test(j.id.trim())) ? j.id.trim() : null,
+				minLoaderVersion: (typeof j.minLoaderVersion === 'number' && isFinite(j.minLoaderVersion)) ? j.minLoaderVersion : null,
+				dependencies: (j.dependencies && typeof j.dependencies === 'object' && !Array.isArray(j.dependencies)) ? j.dependencies : null
+};
 	} catch (e) { return null; }
 }
 function readModMeta(diskName) {
@@ -250,48 +238,62 @@ function saveModConfig(idx, values) {
 }
 
 function effectiveMods() {
-	migrateLegacyDisabled();
 	const cfg = readModsConfig();
-	const deleted = new Set(cfg.deleted || []);
-	const entries = scanDiskMods().filter(m => !deleted.has(m.canonical));
+	const entries = scanDiskMods();
 	const byName = new Map(entries.map(m => [m.canonical, m]));
 	const ordered = [];
 	for (const n of (cfg.order || [])) if (byName.has(n) && !ordered.includes(n)) ordered.push(n);
 	[...byName.keys()].filter(n => !ordered.includes(n))
 		.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
 		.forEach(n => ordered.push(n));
-	const toggles = new Set(cfg.toggles || []);
-	return ordered.map(name => {
+	const metaByName = new Map();
+	const items = ordered.map(name => {
 		const m = byName.get(name);
 		const meta = readModMeta(m.disk);
+		metaByName.set(name, meta);
 		const bare = deriveDisplay(name);
-		const pendingToggle = toggles.has(name);
 		return {
 			name,
 			diskName: m.disk,
-			displayName: cfg.names[name] || (meta && meta.name) || bare,
+			displayName: (meta && meta.name) || bare,
 			rawNameWithoutPrefix: bare,
 			bareName: bare,
+			modId: (meta && meta.id) || bare,
 			hasMeta: !!meta,
 			description: meta ? (meta.description || '') : null,
 			versionText: versionText(meta),
 			versionNum: meta ? meta.version : null,
 			size: m.size,
-			disabled: pendingToggle ? !m.disabled : m.disabled,
-			pendingToggle,
+			disabled: m.disabled,
 			hasConfig: readModSchema(m.disk) !== null,
-				hasUpdateChannel: !!(meta && meta.update && meta.update.source === 'github' && meta.update.repo)
+			hasUpdateChannel: !!(meta && meta.update && meta.update.source === 'github' && meta.update.repo),
+			diagnostics: { status: 'ok', problems: [] }
 		};
 	});
+	// 特性①：依赖/冲突诊断（loaderVersion 传 null，minLoaderVersion 门控属特性③，暂不触发）
+	if (ModCore && items.length) {
+		try {
+			const input = items.map(it => {
+				const meta = metaByName.get(it.name);
+				return { id: it.modId, canonical: it.name, disabled: it.disabled, version: it.versionNum, minLoaderVersion: meta && meta.minLoaderVersion, deps: meta && meta.dependencies };
+			});
+			const res = ModCore.resolveMods(input, null);
+			for (const it of items) it.diagnostics = res.diagnostics[it.name] || { status: 'ok', problems: [] };
+		} catch (e) {}
+	}
+	return items;
+}
+
+// 游戏是否运行中（文件被锁）—— 主进程经 setup 传入 isGameRunning
+function isGameRunning() {
+	try { return !!(D.isGameRunning && D.isGameRunning()); } catch (e) { return false; }
 }
 
 function getModsData() {
 	try {
 		const body = path.join(pluginsDir(), GAME_BODY);
 		const asarItem = fs.existsSync(body) ? { size: entrySize(body, false) } : null;
-		const cfg = readModsConfig();
-		const pending = (cfg.deleted || []).length > 0 || (cfg.toggles || []).length > 0;
-		return ok({ asarItem, mods: effectiveMods(), pending });
+		return ok({ asarItem, mods: effectiveMods(), gameRunning: isGameRunning() });
 	} catch (e) { return fail(e.message); }
 }
 
@@ -300,14 +302,7 @@ function toggleModDisabled(idx) {
 		const mods = effectiveMods();
 		const mod = mods[idx];
 		if (!mod) return fail('模组不存在', 'notfound');
-		const cfg = readModsConfig();
-		const toggles = new Set(cfg.toggles || []);
-		if (toggles.has(mod.name)) {
-			toggles.delete(mod.name);
-			cfg.toggles = [...toggles];
-			writeModsConfig(cfg);
-			return ok({ restartRequired: true });
-		}
+		if (isGameRunning()) return fail('游戏运行中无法启用/禁用模组，请先关闭游戏', 'busy');
 		const full = path.join(pluginsDir(), mod.diskName);
 		const target = mod.diskName.toLowerCase().endsWith(DISABLE_EXT)
 			? full.slice(0, -DISABLE_EXT.length)
@@ -316,23 +311,8 @@ function toggleModDisabled(idx) {
 			fs.renameSync(full, target);
 			return ok({ restartRequired: true });
 		} catch (e) {
-			toggles.add(mod.name);
-			cfg.toggles = [...toggles];
-			writeModsConfig(cfg);
-			return ok({ restartRequired: true, pendingToggle: true });
+			return fail('文件被占用，请关闭游戏后再操作', 'busy');
 		}
-	} catch (e) { return fail(e.message); }
-}
-
-function renameMod(idx, newName) {
-	try {
-		const mods = effectiveMods();
-		const mod = mods[idx];
-		if (!mod) return fail('模组不存在', 'notfound');
-		const cfg = readModsConfig();
-		cfg.names[mod.name] = sanitizeName(newName);
-		writeModsConfig(cfg);
-		return ok();
 	} catch (e) { return fail(e.message); }
 }
 
@@ -341,18 +321,18 @@ function deleteMod(idx) {
 		const mods = effectiveMods();
 		const mod = mods[idx];
 		if (!mod) return fail('模组不存在', 'notfound');
-		const cfg = readModsConfig();
+		if (isGameRunning()) return fail('游戏运行中无法删除模组，请先关闭游戏', 'busy');
 		const full = path.join(pluginsDir(), mod.diskName);
-		let removed = false;
-		try { fs.rmSync(full, { force: true }); removed = !fs.existsSync(full); } catch (e) {}
-		cfg.order = (cfg.order || []).filter(n => n !== mod.name);
-		cfg.toggles = (cfg.toggles || []).filter(n => n !== mod.name);
-		delete cfg.names[mod.name];
-		if (!removed) {
-			const del = new Set(cfg.deleted || []); del.add(mod.name); cfg.deleted = [...del];
+		try {
+			fs.rmSync(full, { force: true });
+			if (fs.existsSync(full)) return fail('文件被占用，请关闭游戏后再操作', 'busy');
+		} catch (e) {
+			return fail('文件被占用，请关闭游戏后再操作', 'busy');
 		}
+		const cfg = readModsConfig();
+		cfg.order = (cfg.order || []).filter(n => n !== mod.name);
 		writeModsConfig(cfg);
-		return ok({ pending: !removed });
+		return ok();
 	} catch (e) { return fail(e.message); }
 }
 
@@ -367,6 +347,22 @@ function moveModTo(oldIndex, newIndex) {
 		cfg.order = arr;
 		writeModsConfig(cfg);
 		return ok({ restartRequired: true });
+	} catch (e) { return fail(e.message); }
+}
+
+// 特性①：一键修复顺序（对 before/after 约束拓扑排序，只重写 order；有环报错）
+function autoFixOrder() {
+	try {
+		if (!ModCore) return fail('依赖解析模块不可用');
+		const mods = effectiveMods();
+		const input = mods.map(m => { const meta = readModMeta(m.diskName); return { id: m.modId, canonical: m.name, disabled: m.disabled, deps: meta && meta.dependencies }; });
+		const enabledOrder = ModCore.suggestOrder(input);
+		if (!enabledOrder) return fail('依赖成环，无法自动排序', 'cycle');
+		const disabled = mods.filter(m => m.disabled).map(m => m.name);
+		const cfg = readModsConfig();
+		cfg.order = enabledOrder.concat(disabled);
+		writeModsConfig(cfg);
+		return ok({ restartRequired: true, order: cfg.order });
 	} catch (e) { return fail(e.message); }
 }
 
@@ -388,7 +384,6 @@ function stageAsarImport(fileName, buf) {
 	if (!existing) {
 		fs.writeFileSync(path.join(pluginsDir(), canonical), buf);
 		const cfg = readModsConfig();
-		cfg.deleted = (cfg.deleted || []).filter(n => n !== canonical);
 		if (!cfg.order.includes(canonical)) cfg.order.push(canonical);
 		writeModsConfig(cfg);
 		return {
@@ -407,11 +402,10 @@ function stageAsarImport(fileName, buf) {
 	}
 	const token = newImportToken();
 	pendingImports.set(token, { targetDisk: existing.disk, bytes: buf });
-	const cfg = readModsConfig();
 	return {
 		status: 'conflict', token, kind,
 		file: existing.canonical,
-		displayName: cfg.names[existing.canonical] || (oldMeta && oldMeta.name) || deriveDisplay(existing.canonical),
+		displayName: (oldMeta && oldMeta.name) || deriveDisplay(existing.canonical),
 		oldVersionText: versionText(oldMeta),
 		newVersionText: versionText(newMeta),
 		disabled: existing.disabled
@@ -715,59 +709,186 @@ async function openExternal(url) {
 function getAppInfo() {
 	const v = readVersionInfo();
 	return ok({
-		version: v.version,                       // "1.2.1"
-		displayVersion: displayVersion(v.version), // "RV1.2.1"
+		version: v.version,               // "1.2.8" / "1.2.8-3CB3895E54"
+		beta: v.beta,
+		displayVersion: displayVersion(v), // "RV1.2.8" / "BRV1.2.8-3CB3895E54"
 		name: v.name,
 		repo: v.repo,
 		repoUrl: 'https://github.com/' + v.repo
 	});
 }
 
-// 从版本串里抽出数字段(容忍 "RV1.2.1" / "v1.2.1" / "1.2.1" 前缀)
-function parseVer(s) {
-	const m = String(s || '').match(/(\d+(?:\.\d+)*)/);
-	return m ? m[1].split('.').map(n => parseInt(n, 10) || 0) : null;
-}
-function cmpVer(a, b) {
-	const pa = parseVer(a), pb = parseVer(b);
-	if (!pa || !pb) return 0;
-	const len = Math.max(pa.length, pb.length);
-	for (let i = 0; i < len; i++) {
-		const x = pa[i] || 0, y = pb[i] || 0;
-		if (x !== y) return x < y ? -1 : 1;
-	}
-	return 0;
+// 本地联调覆盖：resources/.update_override.json 存在时用其 releasesUrl 替代 GitHub API（测完必删）
+function updateOverride() {
+	try {
+		const p = path.join(D.resourcesPath, '.update_override.json');
+		if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf8'));
+	} catch (e) {}
+	return null;
 }
 
-// 去 GitHub release 检查有无新版(网络请求在主进程做, 见 Plan §5)
-async function checkForUpdate() {
+// 拉 release 列表并整理成 pickUpdateTarget 的输入（含 Beta/prerelease；draft 匿名 API 拿不到无需过滤）
+async function fetchReleases(repo, signal) {
+	const o = updateOverride();
+	const url = (o && o.releasesUrl) ? String(o.releasesUrl) : `https://api.github.com/repos/${repo}/releases?per_page=30`;
+	const resp = await fetch(url, { headers: ghHeaders(), signal });
+	if (resp.status === 404) return { status: 404, releases: [] };
+	if (!resp.ok) return { status: resp.status, releases: null };
+	const list = await resp.json();
+	const releases = (Array.isArray(list) ? list : []).map(r => ({
+		tag: String(r.tag_name || r.name || ''),
+		url: r.html_url || ('https://github.com/' + repo + '/releases'),
+		notes: r.body || '',
+		publishedAt: r.published_at || '',
+		assets: (r.assets || []).map(a => ({ name: String(a.name || ''), url: String(a.browser_download_url || ''), size: Number(a.size) || 0 }))
+	}));
+	return { status: 200, releases };
+}
+
+function updateAssetsOf(target) {
+	const assets = (target && target.assets) || [];
+	return {
+		zip: assets.find(a => a.name === 'update.zip') || null,
+		manifest: assets.find(a => a.name === 'update.json') || null
+	};
+}
+
+// 去 GitHub release 检查有无新版(网络请求在主进程做)。betaEnabled = 面板「检测 Beta 测试版更新」开关
+// 通道规则见 ModCore.pickUpdateTarget：Beta 关时若本地是 Beta 版，忽略版本号直接指向最新稳定版
+async function checkForUpdate(betaEnabled) {
+	if (!ModCore || !ModCore.pickUpdateTarget) return fail('版本模块缺失, 请重装加载器', 'nocore');
 	const v = readVersionInfo();
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), 12000);
 	try {
-		const resp = await fetch(`https://api.github.com/repos/${v.repo}/releases/latest`, {
-			headers: { 'User-Agent': 'DevilConnection-ModLoader', 'Accept': 'application/vnd.github+json' },
-			signal: ctrl.signal
-		});
-		if (resp.status === 404) {
-			return ok({ hasUpdate: false, current: displayVersion(v.version), latest: null, note: '仓库暂无发布版本' });
+		const { status, releases } = await fetchReleases(v.repo, ctrl.signal);
+		if (status === 404) return ok({ hasUpdate: false, current: displayVersion(v), latest: null, note: '仓库暂无发布版本' });
+		if (releases === null) return fail(`GitHub 返回 ${status}`, 'http');
+		const picked = ModCore.pickUpdateTarget({ version: v.version, beta: v.beta }, releases, !!betaEnabled);
+		if (!picked.hasUpdate || !picked.target) {
+			const note = !releases.length ? '仓库暂无发布版本'
+				: (!picked.poolSize ? '仓库暂无稳定版发布' : null);
+			return ok({ hasUpdate: false, current: displayVersion(v), latest: null, note });
 		}
-		if (!resp.ok) return fail(`GitHub 返回 ${resp.status}`, 'http');
-		const rel = await resp.json();
-		const tag = rel.tag_name || rel.name || '';
+		const t = picked.target;
+		const ua = updateAssetsOf(t);
 		return ok({
-			hasUpdate: cmpVer(v.version, tag) < 0,
-			current: displayVersion(v.version),
-			latest: tag || null,
-			url: rel.html_url || ('https://github.com/' + v.repo + '/releases'),
-			notes: rel.body || '',
-			publishedAt: rel.published_at || ''
+			hasUpdate: true,
+			current: displayVersion(v),
+			latest: t.tag,
+			url: t.url,
+			notes: t.notes,
+			publishedAt: t.publishedAt,
+			reason: picked.reason,                      // 'newer' | 'leaveBeta'
+			canAutoUpdate: !!(ua.zip && ua.manifest)    // release 带 update.zip+update.json 才能一键更新
 		});
 	} catch (e) {
 		return fail(e.name === 'AbortError' ? '检查更新超时, 请检查网络' : (e.message || '网络错误'), 'network');
 	} finally {
 		clearTimeout(timer);
 	}
+}
+
+// 一键自动更新（外置档路线）：下载 update.zip → sha256 校验 → 覆盖 resources 下外置文件 → 自动重启
+// 只覆盖普通文件，绝不碰 app.asar（运行中被锁）；壳需要更新的版本不发 update.zip，自动降级手动安装器
+let updateAbort = null;
+async function downloadAndApplyUpdate(sender, betaEnabled) {
+	if (updateAbort) return fail('已有更新任务进行中', 'busy');
+	if (!ModCore || !ModCore.pickUpdateTarget) return fail('版本模块缺失, 请重装加载器', 'nocore');
+	if (!AdmZip) return fail('解压模块缺失', 'nozip');
+	const send = (payload) => { try { if (sender && !sender.isDestroyed()) sender.send('mgr:updateProgress', payload); } catch (e) {} };
+	const ctrl = new AbortController();
+	updateAbort = ctrl;
+	try {
+		send({ phase: 'check', pct: 0, text: '正在获取版本信息...' });
+		const v = readVersionInfo();
+		const { status, releases } = await fetchReleases(v.repo, ctrl.signal);
+		if (releases === null || !releases.length) return fail('获取版本信息失败 (HTTP ' + status + ')', 'http');
+		const picked = ModCore.pickUpdateTarget({ version: v.version, beta: v.beta }, releases, !!betaEnabled);
+		if (!picked.hasUpdate || !picked.target) return fail('没有可用的更新', 'noupdate');
+		const t = picked.target;
+		const ua = updateAssetsOf(t);
+		if (!ua.zip || !ua.manifest) return fail('该版本未提供自动更新包', 'noAsset');
+
+		const manifest = await (await fetch(ua.manifest.url, { headers: ghHeaders(), signal: ctrl.signal })).json();
+		const wantSha = String((manifest && manifest.sha256) || '').toLowerCase();
+
+		send({ phase: 'download', pct: 0, text: '正在下载更新包...' });
+		const zresp = await fetch(ua.zip.url, { signal: ctrl.signal });
+		if (!zresp.ok || !zresp.body) return fail('下载失败 (HTTP ' + zresp.status + ')', 'download');
+		const total = Number(zresp.headers.get('content-length')) || ua.zip.size || 0;
+		const reader = zresp.body.getReader();
+		const chunks = [];
+		let received = 0;
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(Buffer.from(value));
+			received += value.length;
+			send({ phase: 'download', pct: total ? Math.min(99, Math.round(received / total * 100)) : null, received, total, text: '正在下载更新包...' });
+		}
+		const buf = Buffer.concat(chunks);
+
+		send({ phase: 'verify', pct: 99, text: '正在校验完整性...' });
+		const got = require('crypto').createHash('sha256').update(buf).digest('hex');
+		if (!wantSha || got !== wantSha) return fail('更新包校验失败 (sha256 不匹配)', 'sha256');
+
+		send({ phase: 'apply', pct: 99, text: '正在应用更新...' });
+		// AdmZip 内部是 electron 补丁版 fs，会拦截 .asar 路径——只用它读字节，落盘一律走本文件顶部的 original-fs
+		const entries = new AdmZip(buf).getEntries().filter(e => !e.isDirectory);
+		const files = [];
+		for (const e of entries) {
+			const rel = String(e.entryName || '').replace(/\\/g, '/').replace(/^\/+/, '');
+			if (!rel || rel.split('/').some(seg => seg === '..' || seg === '')) continue;
+			if (/\.asar$/i.test(rel)) continue;
+			files.push({ rel, data: e.getData() });
+		}
+		if (!files.length) return fail('更新包为空或不含可应用文件', 'badzip');
+		const backupRoot = path.join(D.resourcesPath, '.update_backup');
+		try { fs.rmSync(backupRoot, { recursive: true, force: true }); } catch (e) {}
+		const written = [];
+		try {
+			for (const f of files) {
+				const dst = path.join(D.resourcesPath, f.rel);
+				if (fs.existsSync(dst)) {
+					const bak = path.join(backupRoot, f.rel);
+					ensureDir(path.dirname(bak));
+					fs.copyFileSync(dst, bak);
+				}
+				ensureDir(path.dirname(dst));
+				fs.writeFileSync(dst, f.data);
+				written.push(f.rel);
+			}
+		} catch (e) {
+			for (const rel of written) {
+				try {
+					const bak = path.join(backupRoot, rel);
+					if (fs.existsSync(bak)) fs.copyFileSync(bak, path.join(D.resourcesPath, rel));
+				} catch (e2) {}
+			}
+			return fail('写入更新文件失败, 已回滚: ' + e.message, 'write');
+		}
+
+		send({ phase: 'done', pct: 100, text: '更新完成, 即将自动重启...' });
+		setTimeout(() => {
+			try {
+				const { app } = require('electron');
+				app.relaunch();
+				app.quit();
+			} catch (e) {}
+		}, 1200);
+		return ok({ applied: written.length, version: t.tag, restart: true });
+	} catch (e) {
+		if (e.name === 'AbortError') return fail('更新已取消', 'cancelled');
+		return fail(e.message || '更新失败');
+	} finally {
+		updateAbort = null;
+	}
+}
+
+function cancelUpdate() {
+	try { if (updateAbort) updateAbort.abort(); } catch (e) {}
+	return ok();
 }
 
 function ghHeaders() { return { 'User-Agent': 'DevilConnection-ModLoader', 'Accept': 'application/vnd.github+json' }; }
@@ -854,10 +975,11 @@ function setup(deps) {
 
 	const H = {
 		'mgr:getModsData': () => getModsData(),
+		'mgr:isGameRunning': () => ok(isGameRunning()),
 		'mgr:toggleModDisabled': (e, idx) => toggleModDisabled(idx),
-		'mgr:renameMod': (e, idx, name) => renameMod(idx, name),
 		'mgr:deleteMod': (e, idx) => deleteMod(idx),
 		'mgr:moveModTo': (e, o, n) => moveModTo(o, n),
+		'mgr:autoFixOrder': () => autoFixOrder(),
 		'mgr:importModFromBuffer': (e, fn, bytes) => importModFromBuffer(fn, bytes),
 		'mgr:confirmPendingImport': (e, token) => confirmPendingImport(token),
 		'mgr:cancelPendingImport': (e, token) => cancelPendingImport(token),
@@ -866,7 +988,9 @@ function setup(deps) {
 		'mgr:openModsFolder': () => openModsFolder(),
 		'mgr:openExternal': (e, url) => openExternal(url),
 		'mgr:getAppInfo': () => getAppInfo(),
-		'mgr:checkForUpdate': () => checkForUpdate(),
+		'mgr:checkForUpdate': (e, beta) => checkForUpdate(!!beta),
+		'mgr:downloadAndApplyUpdate': (e, beta) => downloadAndApplyUpdate(e.sender, !!beta),
+		'mgr:cancelUpdate': () => cancelUpdate(),
 		'mgr:checkModUpdate': (e, idx) => checkModUpdate(idx),
 		'mgr:updateMod': (e, idx) => updateMod(idx),
 

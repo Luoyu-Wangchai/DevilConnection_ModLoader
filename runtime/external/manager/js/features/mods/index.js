@@ -43,9 +43,9 @@ export function createModsManager({ askConfirm }) {
 		else await askConfirm({ title: '更新失败', message: res.message || '未知错误' });
 	}
 
-	function createModItemElement(mod, idx, onRefresh) {
+	function createModItemElement(mod, idx, onRefresh, gameRunning) {
 		const wrapper = document.createElement('div');
-		wrapper.innerHTML = renderModRow(mod, idx, sizeMB(mod.size));
+		wrapper.innerHTML = renderModRow(mod, idx, sizeMB(mod.size), gameRunning);
 		const item = wrapper.firstElementChild;
 
 		const configBtn = item.querySelector('[data-a="config"]');
@@ -55,28 +55,20 @@ export function createModsManager({ askConfirm }) {
 		};
 
 		item.querySelector('[data-a="toggle"]').onclick = async () => {
-			await desktopApi.toggleModDisabled(idx);
+			if (gameRunning) { await askConfirm({ title: '游戏运行中', message: '启用/禁用模组需要先完全关闭游戏。' }); return; }
+			const r = normResponse(await desktopApi.toggleModDisabled(idx));
+			if (!r.ok) await askConfirm({ title: '操作失败', message: r.message || '未知错误' });
 			onRefresh();
 		};
-		item.querySelector('[data-a="rename"]').onclick = async () => {
-			const next = await askConfirm({
-				title: '重命名',
-				message: '输入模组显示名称',
-				hasInput: true,
-				defaultValue: mod.rawNameWithoutPrefix || mod.displayName || mod.name
-			});
-			if (next && String(next).trim()) {
-				await desktopApi.renameMod(idx, String(next).trim());
-				onRefresh();
-			}
-		};
 		item.querySelector('[data-a="delete"]').onclick = async () => {
+			if (gameRunning) { await askConfirm({ title: '游戏运行中', message: '删除模组需要先完全关闭游戏。' }); return; }
 			const ok = await askConfirm({
 				title: '删除确认',
 				message: `确定要删除 "${mod.displayName || mod.name}" 吗？`
 			});
 			if (ok) {
-				await desktopApi.deleteMod(idx);
+				const r = normResponse(await desktopApi.deleteMod(idx));
+				if (!r.ok) await askConfirm({ title: '删除失败', message: r.message || '未知错误' });
 				onRefresh();
 			}
 		};
@@ -123,7 +115,7 @@ export function createModsManager({ askConfirm }) {
 
 		list.innerHTML = '';
 		mods.forEach((mod, idx) => {
-			list.appendChild(createModItemElement(mod, idx, refreshMods));
+			list.appendChild(createModItemElement(mod, idx, refreshMods, data.gameRunning));
 		});
 
 		modSortableInstance = Sortable.create(list, {
@@ -206,6 +198,13 @@ export function createModsManager({ askConfirm }) {
 
 		const openBtn = document.getElementById('btn-open-mods-folder');
 		if (openBtn) openBtn.onclick = () => desktopApi.openModsFolder();
+
+		const fixBtn = document.getElementById('btn-autofix-order');
+		if (fixBtn) fixBtn.onclick = async () => {
+			const res = normResponse(await desktopApi.autoFixOrder());
+			if (res.ok) { await askConfirm({ title: '顺序已修复', message: '已按依赖关系重排模组顺序，下次启动生效。' }); refreshMods(); }
+			else await askConfirm({ title: '无法修复', message: res.message || '未知错误' });
+		};
 	}
 
 	function bindDropImport() {

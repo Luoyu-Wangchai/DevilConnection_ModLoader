@@ -42,7 +42,24 @@ import { escapeHtml } from '../../core/utils.js';
 
 const NO_META_WARN = '此模组未尝试兼容本加载器!可能会有异常表现!';
 
-export function renderModRow(mod, idx, sizeText) {
+// 特性①：依赖/冲突问题 → 徽章
+function renderDiag(mod) {
+	const dg = mod.diagnostics || { status: 'ok', problems: [] };
+	if (!dg.problems || !dg.problems.length) return '';
+	const badges = dg.problems.map(p => {
+		let text = p.type, hard = true;
+		if (p.type === 'missingRequired') text = `缺少${p.after ? '后置' : '前置'} ${p.target}` + (p.need ? ` ≥ v${p.need}` : '');
+		else if (p.type === 'depVersionLow') text = `需要 ${p.target} ≥ v${p.need}`;
+		else if (p.type === 'conflict') text = `与 ${p.target} 冲突`;
+		else if (p.type === 'needLoaderUpdate') text = `需更新加载器 ≥ v${p.need}`;
+		else if (p.type === 'orderViolation') { text = p.expected === 'before' ? `前置 ${p.target} 应更靠前` : `后置 ${p.target} 应更靠后`; hard = !!p.hard; }
+		const cls = hard ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600';
+		return `<span class="px-1.5 py-0.5 rounded ${cls} text-[10px]">${escapeHtml(text)}</span>`;
+	}).join(' ');
+	return `<div class="flex flex-wrap gap-1 mt-1">${badges}</div>`;
+}
+
+export function renderModRow(mod, idx, sizeText, gameRunning) {
 	const versionBadge = mod.versionText
 		? `<span class="px-1.5 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-mono shrink-0">${escapeHtml(mod.versionText)}</span>`
 		: '';
@@ -50,6 +67,7 @@ export function renderModRow(mod, idx, sizeText) {
 	const statusBadge = mod.hasUpdateChannel
 		? `<span data-mod-status class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 text-[10px] shrink-0">检测中…</span>`
 		: `<span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 text-[10px] shrink-0">无法自动更新</span>`;
+	const blocked = !!(mod.diagnostics && mod.diagnostics.status === 'blocked');
 	const descLine = mod.hasMeta
 		? (mod.description ? `<div class="text-[10px] md:text-[11px] text-slate-400 mt-0.5 truncate">${escapeHtml(mod.description)}</div>` : '')
 		: `<div class="text-[10px] md:text-[11px] text-amber-600 mt-0.5 truncate">${NO_META_WARN}</div>`;
@@ -63,18 +81,19 @@ export function renderModRow(mod, idx, sizeText) {
 			<span class="font-bold truncate text-slate-700 text-sm md:text-base ${mod.disabled ? 'opacity-50' : ''}">${escapeHtml(mod.displayName || mod.name)}</span>
 			${versionBadge}
 			${statusBadge}
+			${blocked ? '<span class="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[10px] shrink-0">未加载</span>' : ''}
 		</div>
 		${descLine}
+		${renderDiag(mod)}
 		<div class="text-[9px] md:text-[10px] text-slate-400 mt-0.5 uppercase tracking-tighter">
-			优先级 ${(idx + 1).toString().padStart(3, '0')} · ${sizeText} ${mod.disabled ? '· 已禁用' : ''}${mod.pendingToggle ? ' · 下次启动生效' : ''}
+			优先级 ${(idx + 1).toString().padStart(3, '0')} · ${sizeText} ${mod.disabled ? '· 已禁用' : ''}${gameRunning ? ' · 游戏运行中(启停/删除需先关游戏)' : ''}
 		</div>
 	</div>
 	<div class="flex gap-2 shrink-0 sm:opacity-0 group-hover:opacity-100">
 		${mod.hasUpdateChannel ? '<button data-a="update" class="mod-btn px-2 py-1 text-[10px] font-bold text-sky-600 hover:bg-white rounded border border-slate-100 transition-none">更新</button>' : ''}
 		${mod.hasConfig ? '<button data-a="config" class="mod-btn px-2 py-1 text-[10px] font-bold text-accent hover:bg-white rounded border border-slate-100 transition-none">配置</button>' : ''}
-		<button data-a="toggle" class="mod-btn px-2 py-1 text-[10px] font-bold ${mod.disabled ? 'text-emerald-600' : 'text-amber-600'} hover:bg-white rounded border border-slate-100 transition-none">${mod.disabled ? '启用' : '禁用'}</button>
-		<button data-a="rename" class="mod-btn px-2 py-1 text-[10px] font-bold text-indigo-600 hover:bg-white rounded border border-slate-100 transition-none">改名</button>
-		<button data-a="delete" class="mod-btn px-2 py-1 text-[10px] font-bold text-rose-500 hover:bg-white rounded border border-slate-100 transition-none">删除</button>
+		<button data-a="toggle" class="mod-btn px-2 py-1 text-[10px] font-bold ${mod.disabled ? 'text-emerald-600' : 'text-amber-600'} ${gameRunning ? 'opacity-40' : ''} hover:bg-white rounded border border-slate-100 transition-none">${mod.disabled ? '启用' : '禁用'}</button>
+		<button data-a="delete" class="mod-btn px-2 py-1 text-[10px] font-bold text-rose-500 ${gameRunning ? 'opacity-40' : ''} hover:bg-white rounded border border-slate-100 transition-none">删除</button>
 	</div>
 </div>
 	`;

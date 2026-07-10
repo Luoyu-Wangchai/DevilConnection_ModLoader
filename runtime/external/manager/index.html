@@ -74,7 +74,7 @@
 	</aside>
 	<main class="flex-1 relative overflow-hidden flex flex-col w-full">
 		<section id="page-home" class="page-container active p-4 md:p-8">
-			<header class="mb-6 md:mb-10"><h2 id="app-title" class="text-2xl md:text-3xl font-bold text-slate-800">恶魔连结模组管理器 RV1.2.6</h2></header>
+			<header class="mb-6 md:mb-10"><h2 id="app-title" class="text-2xl md:text-3xl font-bold text-slate-800">恶魔连结模组管理器 RV1.2.7</h2></header>
 			<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
 				<div class="card sm:col-span-3 flex flex-col sm:flex-row items-center justify-between bg-gradient-to-br from-accent to-fuchsia-600 border-none gap-6">
 					<div class="text-white text-center sm:text-left">
@@ -111,9 +111,10 @@
 					<p class="text-[11px] text-slate-400 mt-1">可直接把 .asar / .zip / .rar 拖入本窗口安装或更新模组</p>
 					<p class="text-[11px] text-amber-600 mt-1">在此调整好后，点右上角返回控制台「启动游戏」即生效；游戏运行中改动则下次启动生效</p>
 				</div>
-				<div class="flex gap-2 shrink-0 w-full md:w-auto">
-					<button id="btn-open-mods-folder" class="flex-1 md:flex-none btn-secondary whitespace-nowrap">打开模组文件夹</button>
-					<button id="btn-import-mod" class="flex-1 md:flex-none btn-primary whitespace-nowrap">导入新模组</button>
+				<div class="flex flex-col gap-2 shrink-0 w-full md:w-auto">
+					<button id="btn-autofix-order" class="btn-secondary whitespace-nowrap">自动修复顺序</button>
+					<button id="btn-open-mods-folder" class="btn-secondary whitespace-nowrap">打开模组文件夹</button>
+					<button id="btn-import-mod" class="btn-primary whitespace-nowrap">导入新模组</button>
 				</div>
 			</header>
 			<div id="asar-box" class="mb-4"></div>
@@ -174,7 +175,7 @@
 					<h3 class="text-base md:text-lg font-bold text-slate-800 mb-3">使用说明</h3>
 					<ul class="list-disc pl-5 space-y-2 text-sm text-slate-600 leading-relaxed">
 						<li>模组按列表顺序加载，序号越小优先级越高；同名文件由优先级靠前的模组覆盖。</li>
-						<li>拖拽左侧句柄可调整顺序；可随时启用/禁用、改名、删除模组。</li>
+						<li>拖拽左侧句柄可调整顺序；可随时启用/禁用、删除模组（游戏运行中需先关闭游戏）。</li>
 						<li>导入未知来源模组前，建议先在「备份」页备份存档。</li>
 						<li>游戏本体 <code>app.bak.asar</code> 永远最后加载，不在模组列表中显示。</li>
 					</ul>
@@ -200,6 +201,14 @@
 					<h3 class="text-base md:text-lg font-bold text-amber-700 mb-2">⚠ 重要提醒</h3>
 					<p class="text-sm leading-relaxed text-amber-800/90">使用依赖本 Fork 加载器所遇到的问题，<b>请来打扰王柴</b>，而不是打扰 DevilConnection_ModLoader 的原作者。</p>
 				</div>
+				<div class="card">
+					<h3 class="text-base md:text-lg font-bold text-slate-800 mb-3">更新通道</h3>
+					<div class="flex items-center justify-between gap-4">
+						<span class="text-sm text-slate-600">检查更新时检测 Beta 测试版加载器更新</span>
+						<button id="beta-updates-toggle" class="switch switch-off"><span class="switch-dot switch-dot-off"></span></button>
+					</div>
+					<p class="text-xs text-amber-600 mt-3">(测试版加载器会频繁更新且可能遇到大改，通常不建议开发者以外的人使用!)</p>
+				</div>
 			</div>
 		</section>
 		<div id="task-progress-wrap" class="hidden fixed bottom-20 md:bottom-6 right-4 left-4 md:left-auto md:w-80 bg-white shadow-2xl rounded-2xl p-4 border border-slate-100 z-50">
@@ -211,6 +220,17 @@
 			<p id="task-progress-text" class="text-[9px] text-slate-400 mt-2 truncate">请稍候...</p>
 		</div>
 	</main>
+	<div id="update-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[120] flex items-center justify-center p-4">
+		<div class="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl">
+			<h3 class="text-lg font-bold mb-1">正在更新加载器</h3>
+			<p id="update-modal-text" class="text-sm text-slate-500 mb-4">准备中...</p>
+			<div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-3"><div id="update-modal-bar" class="bg-accent h-full w-0 transition-all duration-200"></div></div>
+			<div class="flex items-center justify-between">
+				<span id="update-modal-pct" class="text-[11px] font-mono text-accent"></span>
+				<button id="update-modal-cancel" class="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-lg">取消更新</button>
+			</div>
+		</div>
+	</div>
 	<div id="modal-container" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
 		<div id="confirm-dialog" class="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl scale-95 opacity-0 transition-all duration-300">
 			<h3 id="confirm-title" class="text-lg font-bold mb-1">提示</h3>

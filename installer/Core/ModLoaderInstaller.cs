@@ -16,6 +16,7 @@ public sealed class ModLoaderInstaller
     public string BackupPath => Path.Combine(PluginsDir, "app.bak.asar");
     private string ModLoaderJs => Path.Combine(ResourcesDir, "ModLoader.js");
     private string ManagerJs => Path.Combine(ResourcesDir, "Manager.js");
+    private string ModCoreJs => Path.Combine(ResourcesDir, "ModCore.js");
     private string ManagerDir => Path.Combine(ResourcesDir, "manager");
     private string VersionJson => Path.Combine(ResourcesDir, "version.json");
 
@@ -64,38 +65,52 @@ public sealed class ModLoaderInstaller
         catch { return null; }
     }
 
+    // 返回规范版本串：Beta 版（version.json 的 beta:true）带 B 前缀，如 "B1.2.8-3CB3895E54"；稳定版为纯 "1.2.8"
     private static string? ReadVersionFromJson(string jsonText)
     {
         try
         {
             using var doc = JsonDocument.Parse(jsonText);
             if (doc.RootElement.TryGetProperty("version", out var v) && v.ValueKind == JsonValueKind.String)
-                return v.GetString();
+            {
+                string ver = v.GetString() ?? "";
+                bool beta = doc.RootElement.TryGetProperty("beta", out var b) && b.ValueKind == JsonValueKind.True;
+                return beta ? "B" + ver : ver;
+            }
         }
         catch { }
         return null;
     }
 
-    // 比较两个版本串（容忍 RV/v 前缀，抽数字段逐段比）：a<b→-1, a>b→1, 相等→0
+    // 比较两个版本串（容忍 B/RV/v 前缀）：数字段任意长度逐位比、缺位补 0；全等再比 "-hex" 构建时间戳（无=0）
+    // a<b→-1, a>b→1, 相等→0
     public static int CompareVersions(string? a, string? b)
     {
-        int[] pa = ParseVer(a), pb = ParseVer(b);
-        int len = Math.Max(pa.Length, pb.Length);
+        var pa = ParseVer(a);
+        var pb = ParseVer(b);
+        int len = Math.Max(pa.Nums.Length, pb.Nums.Length);
         for (int i = 0; i < len; i++)
         {
-            int x = i < pa.Length ? pa[i] : 0;
-            int y = i < pb.Length ? pb[i] : 0;
+            int x = i < pa.Nums.Length ? pa.Nums[i] : 0;
+            int y = i < pb.Nums.Length ? pb.Nums[i] : 0;
             if (x != y) return x < y ? -1 : 1;
         }
+        if (pa.Ts != pb.Ts) return pa.Ts < pb.Ts ? -1 : 1;
         return 0;
     }
 
-    private static int[] ParseVer(string? s)
+    private static (int[] Nums, long Ts) ParseVer(string? s)
     {
-        var m = Regex.Match(s ?? "", @"\d+(?:\.\d+)*");
-        return m.Success
+        string str = (s ?? "").Trim();
+        var m = Regex.Match(str, @"\d+(?:\.\d+)*");
+        int[] nums = m.Success
             ? m.Value.Split('.').Select(x => int.TryParse(x, out var n) ? n : 0).ToArray()
             : new[] { 0 };
+        long ts = 0;
+        var tm = Regex.Match(str, @"-([0-9a-fA-F]+)\s*$");
+        if (tm.Success)
+            long.TryParse(tm.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, null, out ts);
+        return (nums, ts);
     }
 
     public delegate void Progress(string message);
@@ -145,6 +160,8 @@ public sealed class ModLoaderInstaller
             log("正在部署 ModLoader.js / Manager.js / 管理面板 ...");
             File.Copy(Path.Combine(externalDir, "ModLoader.js"), ModLoaderJs, true);
             File.Copy(Path.Combine(externalDir, "Manager.js"), ManagerJs, true);
+            string modCoreSrc = Path.Combine(externalDir, "ModCore.js");
+            if (File.Exists(modCoreSrc)) File.Copy(modCoreSrc, ModCoreJs, true);
             CopyDir(Path.Combine(externalDir, "manager"), ManagerDir);
             string versionSrc = Path.Combine(externalDir, "version.json");
             if (File.Exists(versionSrc)) File.Copy(versionSrc, VersionJson, true);
@@ -181,6 +198,7 @@ public sealed class ModLoaderInstaller
         log("正在清除加载器文件 ...");
         TryDelete(ModLoaderJs);
         TryDelete(ManagerJs);
+        TryDelete(ModCoreJs);
         TryDeleteDir(ManagerDir);
         TryDelete(VersionJson);
         TryDelete(Path.Combine(ResourcesDir, "mod_loader.log"));

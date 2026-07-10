@@ -12,14 +12,17 @@ export const desktopApi = {
 	toggleModDisabled(idx) {
 		return window.desktopUI.toggleModDisabled(idx);
 	},
-	renameMod(idx, name) {
-		return window.desktopUI.renameMod(idx, name);
+	isGameRunning() {
+		return window.desktopUI.isGameRunning();
 	},
 	deleteMod(idx) {
 		return window.desktopUI.deleteMod(idx);
 	},
 	moveModTo(oldIndex, newIndex) {
 		return window.desktopUI.moveModTo(oldIndex, newIndex);
+	},
+	autoFixOrder() {
+		return window.desktopUI.autoFixOrder();
 	},
 	importModFromBuffer(fileName, bytes) {
 		return window.desktopUI.importModFromBuffer(fileName, bytes);
@@ -51,8 +54,17 @@ export const desktopApi = {
 	getAppInfo() {
 		return window.desktopUI.getAppInfo();
 	},
-	checkForUpdate() {
-		return window.desktopUI.checkForUpdate();
+	checkForUpdate(beta) {
+		return window.desktopUI.checkForUpdate(beta);
+	},
+	downloadAndApplyUpdate(beta) {
+		return window.desktopUI.downloadAndApplyUpdate(beta);
+	},
+	cancelUpdate() {
+		return window.desktopUI.cancelUpdate();
+	},
+	onUpdateProgress(callback) {
+		return window.desktopUI.onUpdateProgress(callback);
 	},
 
 	autoBackup(settings) {
