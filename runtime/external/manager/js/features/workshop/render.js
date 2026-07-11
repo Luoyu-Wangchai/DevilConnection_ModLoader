@@ -35,7 +35,6 @@ function statusBadge(mod) {
 }
 
 export function renderStoreRow(mod, i, gameRunning) {
-	const initial = (mod.name || '?').slice(0, 1);
 	const localBadge = mod.installed && mod.localDisplay
 		? `<span class="px-1.5 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-mono shrink-0">本地 ${escapeHtml(mod.localDisplay)}</span>`
 		: '';
@@ -58,7 +57,6 @@ export function renderStoreRow(mod, i, gameRunning) {
 	return `
 <div class="p-4 bg-white hover:bg-slate-50 transition-colors duration-150" data-store-idx="${i}">
 	<div class="flex items-center gap-3">
-		<div class="w-10 h-10 rounded-xl bg-accent/10 text-accent flex items-center justify-center font-bold shrink-0">${escapeHtml(initial)}</div>
 		<div class="flex-1 min-w-0">
 			<div class="flex items-center gap-2 min-w-0 flex-wrap">
 				<span class="font-bold text-slate-700 truncate">${escapeHtml(mod.name)}</span>
@@ -75,7 +73,7 @@ export function renderStoreRow(mod, i, gameRunning) {
 			${ghBtn}
 		</div>
 	</div>
-	<div data-history-panel class="hidden mt-3 ml-13 rounded-xl bg-slate-50 border border-slate-100 px-4 py-3"></div>
+	<div data-history-panel class="hidden mt-3 rounded-xl bg-slate-50 border border-slate-100 px-4 py-3"></div>
 </div>`;
 }
 

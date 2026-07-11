@@ -140,6 +140,21 @@
 					<button id="btn-workshop-refresh" class="btn-secondary whitespace-nowrap">刷新列表</button>
 				</div>
 			</header>
+			<div class="mb-4">
+				<div class="relative">
+					<svg class="w-4 h-4 text-slate-300 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+					<input id="workshop-search" type="text" placeholder="搜索模组名称 / 简介 / 作者..." class="w-full bg-white border border-slate-200 rounded-2xl pl-11 pr-4 py-3 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:border-accent/40 focus:ring-2 focus:ring-accent/10 shadow-glass">
+				</div>
+			</div>
+			<div id="workshop-progress" class="card mb-4 hidden">
+				<div class="flex items-center justify-between mb-2">
+					<span id="workshop-progress-text" class="text-sm font-bold text-slate-700">正在下载...</span>
+					<span id="workshop-progress-pct" class="text-xs text-slate-400 font-mono"></span>
+				</div>
+				<div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+					<div id="workshop-progress-bar" class="h-full bg-accent rounded-full" style="width:0%"></div>
+				</div>
+			</div>
 			<div class="card p-0 overflow-hidden">
 				<div class="bg-slate-50/50 px-4 md:px-6 py-2 md:py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex justify-between">
 					<span>收录模组</span><span class="hidden sm:block">操作</span>

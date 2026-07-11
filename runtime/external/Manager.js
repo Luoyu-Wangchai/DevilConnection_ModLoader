@@ -1070,18 +1070,21 @@ async function getStoreList() {
 	} finally { clearTimeout(timer); }
 }
 
-// 安装/更新/降级：下载指定 release（缺省 latest）的 .asar → 复用导入管线（保留前缀/启停/config）
-async function storeInstallRelease(repo, tag) {
+// 安装/更新/降级：流式下载指定 release（缺省 latest）的 .asar（进度经 mgr:storeProgress 推给面板）
+// → 复用导入管线（保留前缀/启停/config）
+async function storeInstallRelease(sender, repo, tag) {
 	if (!repo) return fail('缺少仓库参数');
 	if (isGameRunning()) return fail('游戏运行中，请先关闭游戏再安装或更新模组', 'running');
+	const send = (p) => { try { if (sender) sender.send('mgr:storeProgress', p); } catch (e) {} };
 	const ctrl = new AbortController();
-	const timer = setTimeout(() => ctrl.abort(), 120000);
+	const timer = setTimeout(() => ctrl.abort(), 180000);
 	try {
+		send({ phase: 'meta', text: '正在获取版本信息...' });
 		const url = tag
 			? `https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`
 			: `https://api.github.com/repos/${repo}/releases/latest`;
 		const relResp = await fetch(url, { headers: ghHeaders(), signal: ctrl.signal });
-		if (!relResp.ok) return fail(`获取 release 失败 (HTTP ${relResp.status})`);
+		if (!relResp.ok) { send({ phase: 'done' }); return fail(`获取 release 失败 (HTTP ${relResp.status})`); }
 		const rel = await relResp.json();
 		const assets = rel.assets || [];
 		let assetName = null;
@@ -1093,17 +1096,41 @@ async function storeInstallRelease(repo, tag) {
 			} catch (e) {}
 		}
 		const asarAsset = (assetName && assets.find(a => a.name === assetName)) || assets.find(a => /\.asar$/i.test(a.name));
-		if (!asarAsset) return fail('该 release 未提供 .asar 资产');
+		if (!asarAsset) { send({ phase: 'done' }); return fail('该 release 未提供 .asar 资产'); }
 		const dl = await fetch(asarAsset.browser_download_url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
-		if (!dl.ok) return fail(`下载失败 (HTTP ${dl.status})`);
-		const buf = Buffer.from(new Uint8Array(await dl.arrayBuffer()));
+		if (!dl.ok) { send({ phase: 'done' }); return fail(`下载失败 (HTTP ${dl.status})`); }
+		const total = Number(dl.headers.get('content-length')) || Number(asarAsset.size) || 0;
+		let buf;
+		if (dl.body && dl.body.getReader) {
+			const reader = dl.body.getReader();
+			const chunks = [];
+			let received = 0;
+			let lastPct = -1;
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				chunks.push(Buffer.from(value));
+				received += value.length;
+				const pct = total ? Math.min(99, Math.round(received / total * 100)) : null;
+				if (pct !== lastPct) {
+					lastPct = pct;
+					send({ phase: 'download', pct, received, total, name: asarAsset.name, tag: rel.tag_name });
+				}
+			}
+			buf = Buffer.concat(chunks);
+		} else {
+			buf = Buffer.from(new Uint8Array(await dl.arrayBuffer()));
+		}
+		send({ phase: 'install', pct: 99, text: '正在安装...' });
 		const r = stageAsarImport(asarAsset.name, buf);
-		if (r.status === 'invalid') return fail(r.message || '下载的模组文件无效');
-		if (r.status === 'added') return ok({ installed: true, kind: 'added', tag: rel.tag_name });
+		if (r.status === 'invalid') { send({ phase: 'done' }); return fail(r.message || '下载的模组文件无效'); }
+		if (r.status === 'added') { send({ phase: 'done', pct: 100 }); return ok({ installed: true, kind: 'added', tag: rel.tag_name }); }
 		const c = confirmPendingImport(r.token);
+		send({ phase: 'done', pct: 100 });
 		if (!c.ok) return c;
 		return ok({ installed: true, kind: r.kind, tag: rel.tag_name });
 	} catch (e) {
+		send({ phase: 'done' });
 		if (e.name === 'AbortError') return fail('下载超时', 'timeout');
 		return fail(e.message);
 	} finally { clearTimeout(timer); }
@@ -1159,7 +1186,7 @@ function setup(deps) {
 		'mgr:checkModUpdate': (e, idx) => checkModUpdate(idx),
 		'mgr:updateMod': (e, idx) => updateMod(idx),
 		'mgr:getStoreList': () => getStoreList(),
-		'mgr:storeInstall': (e, repo, tag) => storeInstallRelease(String(repo || ''), tag ? String(tag) : null),
+		'mgr:storeInstall': (e, repo, tag) => storeInstallRelease(e.sender, String(repo || ''), tag ? String(tag) : null),
 		'mgr:storeHistory': (e, repo) => storeHistory(String(repo || '')),
 
 		'mgr:autoBackup': (e, s) => autoBackup(s),

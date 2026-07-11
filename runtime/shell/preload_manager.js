@@ -24,6 +24,11 @@ contextBridge.exposeInMainWorld('desktopUI', {
 	getStoreList: () => invoke('mgr:getStoreList'),
 	storeInstall: (repo, tag) => invoke('mgr:storeInstall', repo, tag),
 	storeHistory: (repo) => invoke('mgr:storeHistory', repo),
+	onStoreProgress(callback) {
+		const listener = (_e, payload) => callback(payload);
+		ipcRenderer.on('mgr:storeProgress', listener);
+		return () => ipcRenderer.removeListener('mgr:storeProgress', listener);
+	},
 	getModConfig: (idx) => invoke('mgr:getModConfig', idx),
 	saveModConfig: (idx, values) => invoke('mgr:saveModConfig', idx, values),
 	openModsFolder: () => invoke('mgr:openModsFolder'),

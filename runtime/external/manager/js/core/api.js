@@ -48,6 +48,9 @@ export const desktopApi = {
 	storeHistory(repo) {
 		return window.desktopUI.storeHistory(repo);
 	},
+	onStoreProgress(callback) {
+		return window.desktopUI.onStoreProgress(callback);
+	},
 	getModConfig(idx) {
 		return window.desktopUI.getModConfig(idx);
 	},

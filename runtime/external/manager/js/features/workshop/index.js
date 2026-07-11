@@ -14,8 +14,53 @@ export function createWorkshopManager({ askConfirm }) {
 	let mods = [];
 	let gameRunning = false;
 	let busy = false;
+	let filterText = '';
 
 	const listEl = () => document.getElementById('workshop-list');
+
+	// ---- 下载进度卡片（上方动态显示）----
+	function progressEls() {
+		return {
+			wrap: document.getElementById('workshop-progress'),
+			text: document.getElementById('workshop-progress-text'),
+			pct: document.getElementById('workshop-progress-pct'),
+			bar: document.getElementById('workshop-progress-bar')
+		};
+	}
+	function showProgress(modName) {
+		const p = progressEls();
+		if (!p.wrap) return;
+		p.text.textContent = `正在准备下载「${modName}」...`;
+		p.pct.textContent = '';
+		p.bar.style.width = '0%';
+		p.wrap.classList.remove('hidden');
+	}
+	function updateProgress(modName, payload) {
+		const p = progressEls();
+		if (!p.wrap || !payload) return;
+		if (payload.phase === 'meta') {
+			p.text.textContent = `正在获取「${modName}」版本信息...`;
+		} else if (payload.phase === 'download') {
+			const mb = payload.received ? (payload.received / 1024 / 1024).toFixed(2) : '0';
+			const totalMb = payload.total ? (payload.total / 1024 / 1024).toFixed(2) : null;
+			p.text.textContent = `正在下载「${modName}」${payload.tag ? ' ' + payload.tag : ''}`;
+			if (payload.pct != null) {
+				p.bar.style.width = payload.pct + '%';
+				p.pct.textContent = totalMb ? `${payload.pct}% · ${mb} / ${totalMb} MB` : payload.pct + '%';
+			} else {
+				p.pct.textContent = mb + ' MB';
+			}
+		} else if (payload.phase === 'install') {
+			p.text.textContent = `正在安装「${modName}」...`;
+			p.bar.style.width = '99%';
+		} else if (payload.phase === 'done') {
+			p.bar.style.width = '100%';
+		}
+	}
+	function hideProgress() {
+		const p = progressEls();
+		if (p.wrap) setTimeout(() => p.wrap.classList.add('hidden'), 400);
+	}
 
 	async function doInstall(mod, tag) {
 		if (busy) return;
@@ -31,7 +76,11 @@ export function createWorkshopManager({ askConfirm }) {
 		const go = await askConfirm({ title: tag ? '安装历史版本' : (mod.installed ? '更新模组' : '下载模组'), message: action });
 		if (!go) return;
 		busy = true;
+		showProgress(mod.name);
+		const unsub = desktopApi.onStoreProgress((payload) => updateProgress(mod.name, payload));
 		const res = normResponse(await desktopApi.storeInstall(mod.repo, tag || undefined));
+		if (unsub) unsub();
+		hideProgress();
 		busy = false;
 		if (res.ok) {
 			await askConfirm({ title: '完成', message: `「${mod.name}」已安装${tag ? `（${tag}）` : ''}，下次启动游戏生效。` });
@@ -84,6 +133,31 @@ export function createWorkshopManager({ askConfirm }) {
 		});
 	}
 
+	// 搜索过滤：名称 / 简介 / 作者，行保留原始索引以正确绑定操作
+	function matchesFilter(m) {
+		if (!filterText) return true;
+		const q = filterText.toLowerCase();
+		return (m.name || '').toLowerCase().includes(q)
+			|| (m.desc || '').toLowerCase().includes(q)
+			|| (m.author || '').toLowerCase().includes(q);
+	}
+
+	function renderList() {
+		const el = listEl();
+		if (!el) return;
+		const visible = mods.map((m, i) => ({ m, i })).filter(x => matchesFilter(x.m));
+		if (!mods.length) {
+			el.innerHTML = renderWorkshopEmpty();
+			return;
+		}
+		if (!visible.length) {
+			el.innerHTML = '<div class="p-10 text-slate-300 text-center italic text-xs">没有匹配的模组</div>';
+			return;
+		}
+		el.innerHTML = visible.map(x => renderStoreRow(x.m, x.i, gameRunning)).join('');
+		bindRowActions();
+	}
+
 	async function refreshWorkshop() {
 		const el = listEl();
 		if (!el) return;
@@ -98,17 +172,19 @@ export function createWorkshopManager({ askConfirm }) {
 			return;
 		}
 		mods = (res.data && res.data.mods) || [];
-		if (!mods.length) {
-			el.innerHTML = renderWorkshopEmpty();
-			return;
-		}
-		el.innerHTML = mods.map((m, i) => renderStoreRow(m, i, gameRunning)).join('');
-		bindRowActions();
+		renderList();
 	}
 
 	function bindEvents() {
 		const btn = document.getElementById('btn-workshop-refresh');
 		if (btn) btn.onclick = () => refreshWorkshop();
+		const search = document.getElementById('workshop-search');
+		if (search) {
+			search.oninput = () => {
+				filterText = search.value.trim();
+				renderList();
+			};
+		}
 	}
 
 	return { refreshWorkshop, bindEvents };
