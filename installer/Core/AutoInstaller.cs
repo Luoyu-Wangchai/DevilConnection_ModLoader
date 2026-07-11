@@ -34,7 +34,8 @@ public static class AutoInstaller
         {
             if (configPath is null || !File.Exists(configPath))
                 throw new InvalidOperationException("缺少 --config 配置文件");
-            cfg = JsonSerializer.Deserialize<AutoConfig>(File.ReadAllText(configPath))
+            cfg = JsonSerializer.Deserialize<AutoConfig>(File.ReadAllText(configPath),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                   ?? throw new InvalidOperationException("配置文件解析为空");
         }
         catch (Exception ex) { Log("❌ 读取配置失败: " + ex.Message); return 1; }

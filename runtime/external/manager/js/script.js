@@ -183,13 +183,13 @@ async function runUpdateCheck(interactive) {
 		if (d.canAutoUpdate) {
 			const go = await askConfirm({
 				title: `发现新版本 ${d.latest}`,
-				message: head + ` 是否立即自动更新？完成后加载器将自动重启（游戏若在运行也会一并重启）。`
+				message: head + ` 是否立即自动更新？完成后加载器将自动重启`
 			});
 			if (go) runAutoUpdate();
 		} else if (d.shellChanged) {
 			const go = await askConfirm({
 				title: `发现新版本 ${d.latest}`,
-				message: head + ` 检测到该新版本更新了核心文件，无法直接热更新。是否自动下载安装器完成更新？（加载器与游戏将自动重启）`
+				message: head + ` 是否立即自动更新？完成后加载器将自动重启 (检测到核心文件更新，本次更新将会采用无头installer更新)`
 			});
 			if (go) runInstallerUpdate();
 		} else {

@@ -781,43 +781,57 @@ function updateAssetsOf(target) {
 	};
 }
 
-// 去 GitHub release 检查有无新版(网络请求在主进程做)。betaEnabled = 面板「检测 Beta 测试版更新」开关
-// 通道规则见 ModCore.pickUpdateTarget：Beta 关时若本地是 Beta 版，忽略版本号直接指向最新稳定版
+// 版本检查数据源 = 仓库 main 分支的 latest.json（raw.githubusercontent，走 CDN 不受 API 60次/小时限额）
+// 结构：{ stable:{version,beta,shellVersion,tag,notes,installer,updateZip,updateJson,runtimeZip}, beta:{...} }
+// .update_override.json 的 latestUrl 可本地联调覆盖
+async function fetchLatestManifest(repo, signal) {
+	const o = updateOverride();
+	const url = (o && o.latestUrl) ? String(o.latestUrl) : `https://raw.githubusercontent.com/${repo}/main/latest.json`;
+	const resp = await fetch(url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal, cache: 'no-store' });
+	if (!resp.ok) return { status: resp.status, manifest: null };
+	return { status: 200, manifest: await resp.json() };
+}
+
+// 按 Beta 开关从 latest.json 选目标通道，判断是否更新 / 是否动壳
+function resolveUpdateTarget(v, manifest, betaEnabled) {
+	const cmp = ModCore.cmpVerX;
+	const stable = (manifest && manifest.stable) || null;
+	const beta = (manifest && manifest.beta) || null;
+	let target = null, reason = 'newer';
+	if (betaEnabled) {
+		for (const c of [stable, beta]) if (c && (!target || cmp(c.version, target.version) > 0)) target = c;
+	} else {
+		target = stable;
+		if (v.beta && stable) reason = 'leaveBeta';   // 本地 Beta + 关闭 Beta 通道 → 回退最新稳定版
+	}
+	if (!target) return { target: null, reason, hasUpdate: false, shellChanged: false };
+	const hasUpdate = reason === 'leaveBeta' ? true : cmp(target.version, v.version) > 0;
+	const shellChanged = (typeof target.shellVersion === 'number') && target.shellVersion > (v.shellVersion || 1);
+	return { target, reason, hasUpdate, shellChanged };
+}
+
+// 检查有无新版（走 raw latest.json，不碰 API 限额）
 async function checkForUpdate(betaEnabled) {
-	if (!ModCore || !ModCore.pickUpdateTarget) return fail('版本模块缺失, 请重装加载器', 'nocore');
+	if (!ModCore || !ModCore.cmpVerX) return fail('版本模块缺失, 请重装加载器', 'nocore');
 	const v = readVersionInfo();
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), 12000);
 	try {
-		const { status, releases } = await fetchReleases(v.repo, ctrl.signal);
-		if (status === 404) return ok({ hasUpdate: false, current: displayVersion(v), latest: null, note: '仓库暂无发布版本' });
-		if (releases === null) return fail(`GitHub 返回 ${status}`, 'http');
-		const picked = ModCore.pickUpdateTarget({ version: v.version, beta: v.beta }, releases, !!betaEnabled);
-		if (!picked.hasUpdate || !picked.target) {
-			const note = !releases.length ? '仓库暂无发布版本'
-				: (!picked.poolSize ? '仓库暂无稳定版发布' : null);
-			return ok({ hasUpdate: false, current: displayVersion(v), latest: null, note });
-		}
-		const t = picked.target;
-		const ua = updateAssetsOf(t);
-		// 壳版本检测：远端 update.json 的 shellVersion 高于本地 → 该版动了核心文件（app.asar），无法直升
-		let shellChanged = false;
-		if (ua.manifest) {
-			try {
-				const m = await (await fetch(ua.manifest.url, { headers: ghHeaders(), signal: ctrl.signal })).json();
-				if (m && typeof m.shellVersion === 'number' && m.shellVersion > (v.shellVersion || 1)) shellChanged = true;
-			} catch (e) {}
-		}
+		const { status, manifest } = await fetchLatestManifest(v.repo, ctrl.signal);
+		if (status === 404 || !manifest) return ok({ hasUpdate: false, current: displayVersion(v), latest: null, note: '暂无版本信息' });
+		const r = resolveUpdateTarget(v, manifest, !!betaEnabled);
+		if (!r.target) return ok({ hasUpdate: false, current: displayVersion(v), latest: null, note: betaEnabled ? '暂无版本信息' : '暂无稳定版发布' });
+		if (!r.hasUpdate) return ok({ hasUpdate: false, current: displayVersion(v), latest: null });
+		const t = r.target;
 		return ok({
 			hasUpdate: true,
 			current: displayVersion(v),
-			latest: t.tag,
-			url: t.url,
-			notes: t.notes,
-			publishedAt: t.publishedAt,
-			reason: picked.reason,                      // 'newer' | 'leaveBeta'
-			shellChanged,                               // true = 新版动了壳，只能走安装器
-			canAutoUpdate: !!(ua.zip && ua.manifest && !shellChanged)
+			latest: t.tag || ('v' + t.version),
+			url: `https://github.com/${v.repo}/releases`,
+			notes: t.notes || '',
+			reason: r.reason,                           // 'newer' | 'leaveBeta'
+			shellChanged: r.shellChanged,               // true = 动了壳，只能走安装器
+			canAutoUpdate: !r.shellChanged && !!(t.updateZip && t.updateJson)
 		});
 	} catch (e) {
 		return fail(e.name === 'AbortError' ? '检查更新超时, 请检查网络' : (e.message || '网络错误'), 'network');
@@ -831,7 +845,7 @@ async function checkForUpdate(betaEnabled) {
 let updateAbort = null;
 async function downloadAndApplyUpdate(sender, betaEnabled) {
 	if (updateAbort) return fail('已有更新任务进行中', 'busy');
-	if (!ModCore || !ModCore.pickUpdateTarget) return fail('版本模块缺失, 请重装加载器', 'nocore');
+	if (!ModCore || !ModCore.cmpVerX) return fail('版本模块缺失, 请重装加载器', 'nocore');
 	if (!AdmZip) return fail('解压模块缺失', 'nozip');
 	const send = (payload) => { try { if (sender && !sender.isDestroyed()) sender.send('mgr:updateProgress', payload); } catch (e) {} };
 	const ctrl = new AbortController();
@@ -839,24 +853,21 @@ async function downloadAndApplyUpdate(sender, betaEnabled) {
 	try {
 		send({ phase: 'check', pct: 0, text: '正在获取版本信息...' });
 		const v = readVersionInfo();
-		const { status, releases } = await fetchReleases(v.repo, ctrl.signal);
-		if (releases === null || !releases.length) return fail('获取版本信息失败 (HTTP ' + status + ')', 'http');
-		const picked = ModCore.pickUpdateTarget({ version: v.version, beta: v.beta }, releases, !!betaEnabled);
-		if (!picked.hasUpdate || !picked.target) return fail('没有可用的更新', 'noupdate');
-		const t = picked.target;
-		const ua = updateAssetsOf(t);
-		if (!ua.zip || !ua.manifest) return fail('该版本未提供自动更新包', 'noAsset');
+		const { status, manifest: lm } = await fetchLatestManifest(v.repo, ctrl.signal);
+		if (!lm) return fail('获取版本信息失败 (HTTP ' + status + ')', 'http');
+		const r = resolveUpdateTarget(v, lm, !!betaEnabled);
+		if (!r.target || !r.hasUpdate) return fail('没有可用的更新', 'noupdate');
+		if (r.shellChanged) return fail('该版本更新了核心文件，无法一键直升，请前往 GitHub 下载最新 Installer', 'shellChanged');
+		const t = r.target;
+		if (!t.updateZip || !t.updateJson) return fail('该版本未提供自动更新包', 'noAsset');
 
-		const manifest = await (await fetch(ua.manifest.url, { headers: ghHeaders(), signal: ctrl.signal })).json();
-		if (manifest && typeof manifest.shellVersion === 'number' && manifest.shellVersion > (v.shellVersion || 1)) {
-			return fail('该版本更新了核心文件，无法一键直升，请前往 GitHub 下载最新 Installer', 'shellChanged');
-		}
+		const manifest = await (await fetch(t.updateJson, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal })).json();
 		const wantSha = String((manifest && manifest.sha256) || '').toLowerCase();
 
 		send({ phase: 'download', pct: 0, text: '正在下载更新包...' });
-		const zresp = await fetch(ua.zip.url, { signal: ctrl.signal });
+		const zresp = await fetch(t.updateZip, { signal: ctrl.signal });
 		if (!zresp.ok || !zresp.body) return fail('下载失败 (HTTP ' + zresp.status + ')', 'download');
-		const total = Number(zresp.headers.get('content-length')) || ua.zip.size || 0;
+		const total = Number(zresp.headers.get('content-length')) || 0;
 		const reader = zresp.body.getReader();
 		const chunks = [];
 		let received = 0;
@@ -946,25 +957,23 @@ function launchDetached(exePath, cfgPath) {
 // 动壳版本自动升级：下载最新 Installer exe → 脱离 job 拉起(--auto) → 加载器自我退出 → Installer 装完重启游戏
 async function downloadAndRunInstaller(sender, betaEnabled) {
 	if (updateAbort) return fail('已有更新任务进行中', 'busy');
-	if (!ModCore || !ModCore.pickUpdateTarget) return fail('版本模块缺失, 请重装加载器', 'nocore');
+	if (!ModCore || !ModCore.cmpVerX) return fail('版本模块缺失, 请重装加载器', 'nocore');
 	const send = (p) => { try { if (sender && !sender.isDestroyed()) sender.send('mgr:updateProgress', p); } catch (e) {} };
 	const ctrl = new AbortController();
 	updateAbort = ctrl;
 	try {
 		send({ phase: 'check', pct: 0, text: '正在获取安装器信息...' });
 		const v = readVersionInfo();
-		const { status, releases } = await fetchReleases(v.repo, ctrl.signal);
-		if (releases === null || !releases.length) return fail('获取版本信息失败 (HTTP ' + status + ')', 'http');
-		const picked = ModCore.pickUpdateTarget({ version: v.version, beta: v.beta }, releases, !!betaEnabled);
-		if (!picked.hasUpdate || !picked.target) return fail('没有可用的更新', 'noupdate');
-		const t = picked.target;
-		const exeAsset = (t.assets || []).find(a => /Installer\.exe$/i.test(a.name)) || (t.assets || []).find(a => /\.exe$/i.test(a.name));
-		if (!exeAsset || !exeAsset.url) return fail('该版本未提供安装器 exe', 'noexe');
+		const { status, manifest: lm } = await fetchLatestManifest(v.repo, ctrl.signal);
+		if (!lm) return fail('获取版本信息失败 (HTTP ' + status + ')', 'http');
+		const r = resolveUpdateTarget(v, lm, !!betaEnabled);
+		if (!r.target || !r.hasUpdate) return fail('没有可用的更新', 'noupdate');
+		if (!r.target.installer) return fail('该版本未提供安装器 exe', 'noexe');
 
 		send({ phase: 'download', pct: 0, text: '正在下载安装器...' });
-		const resp = await fetch(exeAsset.url, { signal: ctrl.signal });
+		const resp = await fetch(r.target.installer, { signal: ctrl.signal });
 		if (!resp.ok || !resp.body) return fail('下载失败 (HTTP ' + resp.status + ')', 'download');
-		const total = Number(resp.headers.get('content-length')) || exeAsset.size || 0;
+		const total = Number(resp.headers.get('content-length')) || 0;
 		const reader = resp.body.getReader();
 		const chunks = [];
 		let received = 0;
@@ -1000,7 +1009,18 @@ async function downloadAndRunInstaller(sender, betaEnabled) {
 function ghHeaders() { return { 'User-Agent': 'DevilConnection-ModLoader', 'Accept': 'application/vnd.github+json' }; }
 
 // ---- 模组更新渠道（mods.json.update）----
-// 检测单模组远端版本 → status: noChannel/noRelease/unknown/outdated/current/ahead
+// 版本检测走 raw.githubusercontent（仓库 main 根目录固定名 mod.update.json，走 CDN 不受 API 60次/小时限额）
+// mod.update.json 结构：{ version(数字，升降级判定唯一依据), displayVersion(显示串), tag(release 标签), asset(.asar 文件名) }
+async function fetchModManifest(repo, signal) {
+	try {
+		const url = `https://raw.githubusercontent.com/${repo}/main/mod.update.json`;
+		const resp = await fetch(url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal, cache: 'no-store' });
+		if (!resp.ok) return null;
+		return await resp.json();
+	} catch (e) { return null; }
+}
+
+// 检测单模组远端版本 → status: noChannel/unknown/outdated/current/ahead
 async function checkModUpdate(idx) {
 	try {
 		const mods = effectiveMods();
@@ -1013,20 +1033,10 @@ async function checkModUpdate(idx) {
 		const ctrl = new AbortController();
 		const timer = setTimeout(() => ctrl.abort(), 12000);
 		try {
-			const relResp = await fetch(`https://api.github.com/repos/${upd.repo}/releases/latest`, { headers: ghHeaders(), signal: ctrl.signal });
-			if (relResp.status === 404) return ok({ status: 'noRelease' });
-			if (!relResp.ok) return fail(`GitHub 返回 ${relResp.status}`, 'http');
-			const rel = await relResp.json();
-			const assets = rel.assets || [];
-			let remoteVer = null, remoteDisplay = rel.tag_name || null;
-			const manifestAsset = (upd.manifest && assets.find(a => a.name === upd.manifest)) || assets.find(a => /\.update\.json$/i.test(a.name));
-			if (manifestAsset) {
-				try {
-					const m = await (await fetch(manifestAsset.browser_download_url, { headers: ghHeaders(), signal: ctrl.signal })).json();
-					if (m && typeof m.version === 'number') remoteVer = m.version;
-					if (m && m.displayVersion) remoteDisplay = String(m.displayVersion);
-				} catch (e) {}
-			}
+			const m = await fetchModManifest(upd.repo, ctrl.signal);
+			if (!m) return ok({ status: 'unknown' });
+			const remoteVer = (typeof m.version === 'number') ? m.version : null;
+			const remoteDisplay = m.displayVersion || m.tag || null;
 			if (remoteVer === null || localVer === null) return ok({ status: 'unknown', remoteDisplay });
 			const status = localVer < remoteVer ? 'outdated' : (localVer > remoteVer ? 'ahead' : 'current');
 			return ok({ status, localVer, remoteVer, remoteDisplay });
@@ -1049,19 +1059,13 @@ async function updateMod(idx) {
 		const ctrl = new AbortController();
 		const timer = setTimeout(() => ctrl.abort(), 60000);
 		try {
-			const rel = await (await fetch(`https://api.github.com/repos/${upd.repo}/releases/latest`, { headers: ghHeaders(), signal: ctrl.signal })).json();
-			const assets = rel.assets || [];
-			let assetName = upd.asset || null;
-			if (!assetName) {
-				const mf = assets.find(a => /\.update\.json$/i.test(a.name));
-				if (mf) { try { const m = await (await fetch(mf.browser_download_url, { headers: ghHeaders(), signal: ctrl.signal })).json(); if (m && m.asset) assetName = String(m.asset); } catch (e) {} }
-			}
-			const asarAsset = (assetName && assets.find(a => a.name === assetName)) || assets.find(a => /\.asar$/i.test(a.name));
-			if (!asarAsset) return fail('远端 release 未找到 .asar 资产');
-			const dl = await fetch(asarAsset.browser_download_url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
+			const m = await fetchModManifest(upd.repo, ctrl.signal);
+			if (!m || !m.tag || !m.asset) return fail('远端版本清单缺失或格式不正确');
+			const url = `https://github.com/${upd.repo}/releases/download/${m.tag}/${m.asset}`;
+			const dl = await fetch(url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
 			if (!dl.ok) return fail(`下载失败 (HTTP ${dl.status})`);
 			const buf = Buffer.from(new Uint8Array(await dl.arrayBuffer()));
-			const r = stageAsarImport(asarAsset.name, buf);
+			const r = stageAsarImport(m.asset, buf);
 			if (r.status === 'invalid') return fail(r.message || '下载的模组文件无效');
 			if (r.status === 'added') return ok({ updated: true, restartRequired: true, note: '已作为新模组安装' });
 			const c = confirmPendingImport(r.token);
@@ -1083,23 +1087,12 @@ function storeSourceUrl() {
 	return `https://raw.githubusercontent.com/${repo}/main/store.json`;
 }
 
-// 查单个收录模组的云端最新版本（release manifest *.update.json 的数字 version）
+// 查单个收录模组的云端最新版本（走 raw mod.update.json，不受 API 限额）
 async function fetchStoreRemote(repo, signal) {
-	const relResp = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: ghHeaders(), signal });
-	if (relResp.status === 404) return { state: 'noRelease' };
-	if (!relResp.ok) return { state: 'error', http: relResp.status };
-	const rel = await relResp.json();
-	const assets = rel.assets || [];
-	let ver = null, display = rel.tag_name || null;
-	const mf = assets.find(a => /\.update\.json$/i.test(a.name));
-	if (mf) {
-		try {
-			const m = await (await fetch(mf.browser_download_url, { headers: ghHeaders(), signal })).json();
-			if (m && typeof m.version === 'number') ver = m.version;
-			if (m && m.displayVersion) display = String(m.displayVersion);
-		} catch (e) {}
-	}
-	return { state: 'ok', ver, display, tag: rel.tag_name || null };
+	const m = await fetchModManifest(repo, signal);
+	if (!m) return { state: 'noManifest' };
+	const ver = (typeof m.version === 'number') ? m.version : null;
+	return { state: 'ok', ver, display: m.displayVersion || m.tag || null, tag: m.tag || null };
 }
 
 async function getStoreList() {
@@ -1158,26 +1151,16 @@ async function storeInstallRelease(sender, repo, tag) {
 	const timer = setTimeout(() => ctrl.abort(), 180000);
 	try {
 		send({ phase: 'meta', text: '正在获取版本信息...' });
-		const url = tag
-			? `https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`
-			: `https://api.github.com/repos/${repo}/releases/latest`;
-		const relResp = await fetch(url, { headers: ghHeaders(), signal: ctrl.signal });
-		if (!relResp.ok) { send({ phase: 'done' }); return fail(`获取 release 失败 (HTTP ${relResp.status})`); }
-		const rel = await relResp.json();
-		const assets = rel.assets || [];
-		let assetName = null;
-		const mf = assets.find(a => /\.update\.json$/i.test(a.name));
-		if (mf) {
-			try {
-				const m = await (await fetch(mf.browser_download_url, { headers: ghHeaders(), signal: ctrl.signal })).json();
-				if (m && m.asset) assetName = String(m.asset);
-			} catch (e) {}
-		}
-		const asarAsset = (assetName && assets.find(a => a.name === assetName)) || assets.find(a => /\.asar$/i.test(a.name));
-		if (!asarAsset) { send({ phase: 'done' }); return fail('该 release 未提供 .asar 资产'); }
-		const dl = await fetch(asarAsset.browser_download_url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
+		// 版本清单走 raw；tag 缺省用清单里的最新 tag，指定 tag（历史版本）则沿用清单的 asset 名拼直链
+		const m = await fetchModManifest(repo, ctrl.signal);
+		if (!m || !m.asset) { send({ phase: 'done' }); return fail('远端版本清单缺失或格式不正确'); }
+		const useTag = tag || m.tag;
+		if (!useTag) { send({ phase: 'done' }); return fail('无法确定版本标签'); }
+		const assetName = m.asset;
+		const dlUrl = `https://github.com/${repo}/releases/download/${useTag}/${assetName}`;
+		const dl = await fetch(dlUrl, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
 		if (!dl.ok) { send({ phase: 'done' }); return fail(`下载失败 (HTTP ${dl.status})`); }
-		const total = Number(dl.headers.get('content-length')) || Number(asarAsset.size) || 0;
+		const total = Number(dl.headers.get('content-length')) || 0;
 		let buf;
 		if (dl.body && dl.body.getReader) {
 			const reader = dl.body.getReader();
@@ -1192,7 +1175,7 @@ async function storeInstallRelease(sender, repo, tag) {
 				const pct = total ? Math.min(99, Math.round(received / total * 100)) : null;
 				if (pct !== lastPct) {
 					lastPct = pct;
-					send({ phase: 'download', pct, received, total, name: asarAsset.name, tag: rel.tag_name });
+					send({ phase: 'download', pct, received, total, name: assetName, tag: useTag });
 				}
 			}
 			buf = Buffer.concat(chunks);
@@ -1200,13 +1183,13 @@ async function storeInstallRelease(sender, repo, tag) {
 			buf = Buffer.from(new Uint8Array(await dl.arrayBuffer()));
 		}
 		send({ phase: 'install', pct: 99, text: '正在安装...' });
-		const r = stageAsarImport(asarAsset.name, buf);
+		const r = stageAsarImport(assetName, buf);
 		if (r.status === 'invalid') { send({ phase: 'done' }); return fail(r.message || '下载的模组文件无效'); }
-		if (r.status === 'added') { send({ phase: 'done', pct: 100 }); return ok({ installed: true, kind: 'added', tag: rel.tag_name }); }
+		if (r.status === 'added') { send({ phase: 'done', pct: 100 }); return ok({ installed: true, kind: 'added', tag: useTag }); }
 		const c = confirmPendingImport(r.token);
 		send({ phase: 'done', pct: 100 });
 		if (!c.ok) return c;
-		return ok({ installed: true, kind: r.kind, tag: rel.tag_name });
+		return ok({ installed: true, kind: r.kind, tag: useTag });
 	} catch (e) {
 		send({ phase: 'done' });
 		if (e.name === 'AbortError') return fail('下载超时', 'timeout');
