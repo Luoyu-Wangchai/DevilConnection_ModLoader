@@ -31,7 +31,7 @@ zip.writeZip(zipPath);
 const buf = fs.readFileSync(zipPath);
 const sha = crypto.createHash('sha256').update(buf).digest('hex');
 const vj = JSON.parse(fs.readFileSync(path.join(src, 'version.json'), 'utf8'));
-const manifest = { version: String(vj.version || ''), beta: !!vj.beta, sha256: sha, asset: 'update.zip' };
+const manifest = { version: String(vj.version || ''), beta: !!vj.beta, shellVersion: (typeof vj.shellVersion === 'number' ? vj.shellVersion : 1), sha256: sha, asset: 'update.zip' };
 fs.writeFileSync(path.join(out, 'update.json'), JSON.stringify(manifest, null, 2) + '\n');
 
 const d = new Date();

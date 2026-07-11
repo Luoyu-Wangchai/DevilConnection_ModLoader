@@ -151,7 +151,15 @@ ipcMain.handle('app:launchGame', async () => {
 app.on('ready', () => {
 	createLoaderWindow();
 	try {
-		globalShortcut.register('F10', () => createLoaderWindow());
+		globalShortcut.register('F10', () => {
+			if (loaderWindow && !loaderWindow.isDestroyed()) {
+				if (loaderWindow.isMinimized()) { loaderWindow.restore(); loaderWindow.focus(); }
+				else if (loaderWindow.isVisible()) { loaderWindow.hide(); }
+				else { loaderWindow.show(); loaderWindow.focus(); }
+			} else {
+				createLoaderWindow();
+			}
+		});
 	} catch (e) {  }
 });
 

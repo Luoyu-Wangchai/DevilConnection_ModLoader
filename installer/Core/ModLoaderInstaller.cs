@@ -83,6 +83,18 @@ public sealed class ModLoaderInstaller
         return null;
     }
 
+    private static string? SafeReadVersionFile(string path)
+    {
+        try { return File.Exists(path) ? ReadVersionFromJson(File.ReadAllText(path)) : null; }
+        catch { return null; }
+    }
+
+    // 规范版本串 → 显示串（B 前缀 = Beta 显示 BRV，否则 RV）
+    public static string DisplayVer(string? raw) =>
+        raw is null ? "未知"
+        : raw.StartsWith("B", StringComparison.OrdinalIgnoreCase) ? "BRV" + raw.Substring(1)
+        : "RV" + raw;
+
     // 比较两个版本串（容忍 B/RV/v 前缀）：数字段任意长度逐位比、缺位补 0；全等再比 "-hex" 构建时间戳（无=0）
     // a<b→-1, a>b→1, 相等→0
     public static int CompareVersions(string? a, string? b)
@@ -116,10 +128,12 @@ public sealed class ModLoaderInstaller
 
     public delegate void Progress(string message);
 
-    public string Install(Progress? log = null)
+    // runtimeZipPath 非空 → 用外部（云端拉取的）runtime.zip；否则用内嵌资源。checkRunning 供无 UI 自动模式跳过（已自行等待退出）。
+    // allowDowngrade=false（自动模式）→ 待装版本低于已安装则拒绝，防止云端失败回退到上古内置版把游戏降级。
+    public string Install(Progress? log = null, string? runtimeZipPath = null, bool checkRunning = true, bool allowDowngrade = true)
     {
         log ??= _ => { };
-        if (GameLocator.IsGameRunning())
+        if (checkRunning && GameLocator.IsGameRunning())
             throw new InvalidOperationException("检测到游戏正在运行，请先完全关闭游戏后再安装。");
 
         var status = CheckStatus();
@@ -132,12 +146,28 @@ public sealed class ModLoaderInstaller
         Directory.CreateDirectory(temp);
         try
         {
-            log("正在释放运行时资源...");
-            ExtractEmbeddedRuntime(temp);
+            if (runtimeZipPath is not null && File.Exists(runtimeZipPath))
+            {
+                log("正在释放云端运行时资源...");
+                ZipFile.ExtractToDirectory(runtimeZipPath, temp, true);
+            }
+            else
+            {
+                log("正在释放内置运行时资源...");
+                ExtractEmbeddedRuntime(temp);
+            }
             string shellDir = Path.Combine(temp, "shell");
             string externalDir = Path.Combine(temp, "external");
             if (!Directory.Exists(shellDir) || !File.Exists(Path.Combine(shellDir, "main.js")))
                 throw new InvalidOperationException("内嵌运行时资源损坏（缺少 shell/main.js）。");
+
+            if (!allowDowngrade)
+            {
+                string? incoming = SafeReadVersionFile(Path.Combine(externalDir, "version.json"));
+                string? installed = GetInstalledVersion();
+                if (installed is not null && incoming is not null && CompareVersions(incoming, installed) < 0)
+                    throw new InvalidOperationException($"待安装版本({DisplayVer(incoming)}) 低于已安装({DisplayVer(installed)})，已阻止降级以防回退到旧版本。");
+            }
 
             if (status == InstallStatus.NotInstalled)
             {

@@ -90,7 +90,7 @@ export function renderModRow(mod, idx, sizeText, gameRunning) {
 		</div>
 	</div>
 	<div class="flex gap-2 shrink-0 sm:opacity-0 group-hover:opacity-100">
-		${mod.hasUpdateChannel ? '<button data-a="update" class="mod-btn px-2 py-1 text-[10px] font-bold text-sky-600 hover:bg-white rounded border border-slate-100 transition-none">更新</button>' : ''}
+		${mod.hasUpdateChannel ? `<button data-a="update" class="mod-btn px-2 py-1 text-[10px] font-bold text-sky-600 ${gameRunning ? 'opacity-40' : ''} hover:bg-white rounded border border-slate-100 transition-none">更新</button>` : ''}
 		${mod.hasConfig ? '<button data-a="config" class="mod-btn px-2 py-1 text-[10px] font-bold text-accent hover:bg-white rounded border border-slate-100 transition-none">配置</button>' : ''}
 		<button data-a="toggle" class="mod-btn px-2 py-1 text-[10px] font-bold ${mod.disabled ? 'text-emerald-600' : 'text-amber-600'} ${gameRunning ? 'opacity-40' : ''} hover:bg-white rounded border border-slate-100 transition-none">${mod.disabled ? '启用' : '禁用'}</button>
 		<button data-a="delete" class="mod-btn px-2 py-1 text-[10px] font-bold text-rose-500 ${gameRunning ? 'opacity-40' : ''} hover:bg-white rounded border border-slate-100 transition-none">删除</button>

@@ -12,6 +12,8 @@ import {
 export function createModsManager({ askConfirm }) {
 	let modSortableInstance = null;
 	const { openConfigModal } = createConfigModal();
+	// 版本检测结果内存缓存（key=文件名|本地版本号：更新后版本变化自动失效），减少 GitHub API 访问
+	const modStatusCache = new Map();
 
 	// 版本状态徽章填色：outdated 橘黄 / current 淡绿 / ahead 淡蓝 / 其它 灰
 	function applyModStatus(el, data) {
@@ -74,14 +76,28 @@ export function createModsManager({ askConfirm }) {
 		};
 
 		const updateBtn = item.querySelector('[data-a="update"]');
-		if (updateBtn) updateBtn.onclick = () => handleModUpdate(idx, mod, onRefresh);
+		if (updateBtn) updateBtn.onclick = async () => {
+			if (gameRunning) { await askConfirm({ title: '游戏运行中', message: '更新模组需要先完全关闭游戏。' }); return; }
+			handleModUpdate(idx, mod, onRefresh);
+		};
 
-		// 有更新渠道的模组：渲染后异步检测远端版本，填色版本状态徽章
+		// 有更新渠道的模组：渲染后填色版本状态徽章——命中内存缓存直接用，未命中才请求一次
 		if (mod.hasUpdateChannel) {
 			const statusEl = item.querySelector('[data-mod-status]');
-			desktopApi.checkModUpdate(idx)
-				.then(res => { const r = normResponse(res); if (statusEl) applyModStatus(statusEl, r.ok ? (r.data || {}) : { status: 'error' }); })
-				.catch(() => { if (statusEl) applyModStatus(statusEl, { status: 'error' }); });
+			const cacheKey = `${mod.diskName}|${mod.versionNum}`;
+			const cached = modStatusCache.get(cacheKey);
+			if (cached) {
+				if (statusEl) applyModStatus(statusEl, cached);
+			} else {
+				desktopApi.checkModUpdate(idx)
+					.then(res => {
+						const r = normResponse(res);
+						const d = r.ok ? (r.data || {}) : { status: 'error' };
+						if (d.status && d.status !== 'error') modStatusCache.set(cacheKey, d);
+						if (statusEl) applyModStatus(statusEl, d);
+					})
+					.catch(() => { if (statusEl) applyModStatus(statusEl, { status: 'error' }); });
+			}
 		}
 
 		return item;

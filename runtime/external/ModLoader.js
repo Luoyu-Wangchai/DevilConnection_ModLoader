@@ -19,7 +19,7 @@ const ENCRYPT_SIG = 'DC_ENC_v1';
 const IS_DEBUG = true;
 const MAX_PATH_CACHE = 2000;
 const MAX_CONFIG_CACHE = 100;
-const BRAND_SUFFIX = ' - DevilConnection ModLoader';
+const BRAND_BASE = ' - DevilConnection_Modloader_Rebuild';
 
 const BLACKLIST = new Set([
 	'modloader.js', 'manager.js', 'package.json', 'main.js',
@@ -428,23 +428,37 @@ const PluginManager = {
 	}
 };
 
+function readBrandSuffix() {
+	try {
+		const p = path.join(Env.getResourcesPath(), 'version.json');
+		if (O.existsSync(p)) {
+			const j = JSON.parse(O.readFileSync(p, 'utf8'));
+			const ver = (j.beta ? 'BRV' : 'RV') + String(j.version || '');
+			return BRAND_BASE + ' - ' + ver;
+		}
+	} catch (e) {}
+	return BRAND_BASE;
+}
+
 const ScriptInjection = {
 	scripts: [],
-	builtIn: `
+	buildBuiltIn(suffix) {
+		return `
 		(function(){
-			const SUFFIX=${JSON.stringify(BRAND_SUFFIX)};
+			const SUFFIX=${JSON.stringify(suffix)};
 			function upd(){try{if(typeof document!=='undefined'&&document.title!==undefined){if(!document.title.includes(SUFFIX))document.title=document.title+SUFFIX;}}catch(e){}}
 			function obs(){const t=document.querySelector('title');if(t){new MutationObserver(upd).observe(t,{childList:true,characterData:true});}else{const h=document.querySelector('head');if(h){const ho=new MutationObserver(()=>{if(document.querySelector('title')){upd();ho.disconnect();obs();}});ho.observe(h,{childList:true});}}}
 			upd();
 			if(document.readyState==='complete'||document.readyState==='interactive')obs();
 			else window.addEventListener('DOMContentLoaded',()=>{upd();obs();});
-		})();`,
+		})();`;
+	},
 
 	scan() {
 		this.scripts = [];
 		this.scripts.push({
 			name: 'DCModLoader',
-			code: `(function(){console.log('[ModLoader] 内置 Hook: DCModLoader');try{${this.builtIn}}catch(e){console.error('[ModLoader] 内置 Hook 错误',e);}})();`
+			code: `(function(){console.log('[ModLoader] 内置 Hook: DCModLoader');try{${this.buildBuiltIn(readBrandSuffix())}}catch(e){console.error('[ModLoader] 内置 Hook 错误',e);}})();`
 		});
 		// 已安装模组清单注入主世界（供模组工坊等展示全部模组；排除游戏本体与内置模组）
 		try {

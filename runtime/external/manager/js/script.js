@@ -117,49 +117,97 @@ async function runAutoUpdate() {
 	pctEl.textContent = '100%';
 }
 
-// 检查更新：去 GitHub release 比对版本（按 Beta 开关选通道），可自动更新则一键更新，否则跳手动下载
+// 动壳版本自动升级：下载最新安装器 → 加载器退出 → 安装器完成更新并重启（进度弹窗同款）
+async function runInstallerUpdate() {
+	const wrap = document.getElementById('update-modal');
+	const text = document.getElementById('update-modal-text');
+	const bar = document.getElementById('update-modal-bar');
+	const pctEl = document.getElementById('update-modal-pct');
+	const btnCancel = document.getElementById('update-modal-cancel');
+	if (!wrap) return;
+	wrap.classList.remove('hidden');
+	text.textContent = '准备中...';
+	bar.style.width = '0%';
+	pctEl.textContent = '';
+	btnCancel.classList.remove('hidden');
+	btnCancel.onclick = () => { desktopApi.cancelUpdate(); };
+	const unsub = desktopApi.onUpdateProgress((p) => {
+		if (!p) return;
+		if (p.text) text.textContent = p.text;
+		if (p.pct != null) { bar.style.width = p.pct + '%'; pctEl.textContent = p.pct + '%'; }
+		else if (p.received) { pctEl.textContent = (p.received / 1024 / 1024).toFixed(1) + ' MB'; }
+		if (p.phase === 'apply') btnCancel.classList.add('hidden');
+	});
+	const res = normResponse(await desktopApi.downloadAndRunInstaller(loaderSettings.beta_updates));
+	if (unsub) unsub();
+	if (!res.ok) {
+		wrap.classList.add('hidden');
+		const go = await askConfirm({ title: '自动升级失败', message: (res.message || '未知错误') + '\n是否前往 GitHub 手动下载安装器？' });
+		if (go) desktopApi.openExternal(appInfo.repoUrl + '/releases');
+		return;
+	}
+	text.textContent = '安装器已启动，加载器即将退出以完成更新...';
+	bar.style.width = '100%';
+	pctEl.textContent = '100%';
+}
+
+// 检查更新：去 GitHub release 比对版本（按 Beta 开关选通道）。
+// 启动时自动静默检查一次（只刷新卡片状态文本）；点击卡片走完整交互流程。
+// 卡片状态文本三态：检测版本更新中... / 已是最新版本! / 检测到更新!
 const cardCheckUpdate = document.getElementById('card-check-update');
-if (cardCheckUpdate) {
-	const label = document.getElementById('check-update-label');
-	const icon = document.getElementById('check-update-icon');
-	let checking = false;
-	cardCheckUpdate.onclick = async () => {
-		if (checking) return;
-		checking = true;
-		const restore = () => { checking = false; if (label) label.textContent = '检查更新'; if (icon) icon.classList.remove('animate-spin'); };
-		if (label) label.textContent = '正在检查...';
-		if (icon) icon.classList.add('animate-spin');
-		const res = normResponse(await desktopApi.checkForUpdate(loaderSettings.beta_updates));
-		restore();
-		if (!res.ok) {
-			await askConfirm({ title: '检查更新失败', message: res.message || '无法连接 GitHub，请检查网络后重试。' });
-			return;
-		}
-		const d = res.data || {};
-		if (d.hasUpdate && d.latest) {
-			const head = d.reason === 'leaveBeta'
-				? `当前 ${d.current} 为 Beta 测试版，已关闭 Beta 更新通道，将回到最新稳定版 ${d.latest}。`
-				: `当前 ${d.current}，最新 ${d.latest}。`;
-			if (d.canAutoUpdate) {
-				const go = await askConfirm({
-					title: `发现新版本 ${d.latest}`,
-					message: head + ` 是否立即自动更新？完成后加载器将自动重启（游戏若在运行也会一并重启）。`
-				});
-				if (go) runAutoUpdate();
-			} else {
-				const go = await askConfirm({
-					title: `发现新版本 ${d.latest}`,
-					message: head + ` 该版本未提供自动更新包，是否前往 GitHub 下载安装器手动更新？`
-				});
-				if (go) desktopApi.openExternal(d.url || appInfo.repoUrl + '/releases');
-			}
-		} else {
-			await askConfirm({
-				title: '已是最新版本',
-				message: d.note ? `当前版本 ${d.current}（${d.note}）。` : `当前版本 ${d.current} 已是最新。`
+const cuLabel = document.getElementById('check-update-label');
+const cuIcon = document.getElementById('check-update-icon');
+let updateChecking = false;
+function setCheckLabel(text) { if (cuLabel) cuLabel.textContent = text; }
+
+async function runUpdateCheck(interactive) {
+	if (updateChecking) return;
+	updateChecking = true;
+	setCheckLabel('检测版本更新中...');
+	if (cuIcon) cuIcon.classList.add('animate-spin');
+	const res = normResponse(await desktopApi.checkForUpdate(loaderSettings.beta_updates));
+	if (cuIcon) cuIcon.classList.remove('animate-spin');
+	updateChecking = false;
+	if (!res.ok) {
+		setCheckLabel('检查更新');
+		if (interactive) await askConfirm({ title: '检查更新失败', message: res.message || '无法连接 GitHub，请检查网络后重试。' });
+		return;
+	}
+	const d = res.data || {};
+	setCheckLabel(d.hasUpdate ? '检测到更新!' : '已是最新版本!');
+	if (!interactive) return;
+	if (d.hasUpdate && d.latest) {
+		const head = d.reason === 'leaveBeta'
+			? `当前 ${d.current} 为 Beta 测试版，已关闭 Beta 更新通道，将回到最新稳定版 ${d.latest}。`
+			: `当前 ${d.current}，最新 ${d.latest}。`;
+		if (d.canAutoUpdate) {
+			const go = await askConfirm({
+				title: `发现新版本 ${d.latest}`,
+				message: head + ` 是否立即自动更新？完成后加载器将自动重启（游戏若在运行也会一并重启）。`
 			});
+			if (go) runAutoUpdate();
+		} else if (d.shellChanged) {
+			const go = await askConfirm({
+				title: `发现新版本 ${d.latest}`,
+				message: head + ` 检测到该新版本更新了核心文件，无法直接热更新。是否自动下载安装器完成更新？（加载器与游戏将自动重启）`
+			});
+			if (go) runInstallerUpdate();
+		} else {
+			const go = await askConfirm({
+				title: `发现新版本 ${d.latest}`,
+				message: head + ` 该版本未提供自动更新包，是否前往 GitHub 下载安装器手动更新？`
+			});
+			if (go) desktopApi.openExternal(d.url || appInfo.repoUrl + '/releases');
 		}
-	};
+	} else {
+		await askConfirm({
+			title: '已是最新版本',
+			message: d.note ? `当前版本 ${d.current}（${d.note}）。` : `当前版本 ${d.current} 已是最新。`
+		});
+	}
+}
+if (cardCheckUpdate) {
+	cardCheckUpdate.onclick = () => runUpdateCheck(true);
 }
 
 document.getElementById('btn-start').onclick = async () => {
@@ -180,4 +228,5 @@ window.onload = async () => {
 	await initAppInfo();
 	await backupsManager.initBackupSystem();
 	await navigation.switchPage('home');
+	runUpdateCheck(false);
 };

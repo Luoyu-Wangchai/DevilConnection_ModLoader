@@ -72,6 +72,9 @@ export const desktopApi = {
 	downloadAndApplyUpdate(beta) {
 		return window.desktopUI.downloadAndApplyUpdate(beta);
 	},
+	downloadAndRunInstaller(beta) {
+		return window.desktopUI.downloadAndRunInstaller(beta);
+	},
 	cancelUpdate() {
 		return window.desktopUI.cancelUpdate();
 	},

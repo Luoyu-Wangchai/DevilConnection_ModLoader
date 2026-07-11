@@ -84,7 +84,7 @@ export function createWorkshopManager({ askConfirm }) {
 		busy = false;
 		if (res.ok) {
 			await askConfirm({ title: '完成', message: `「${mod.name}」已安装${tag ? `（${tag}）` : ''}，下次启动游戏生效。` });
-			await refreshWorkshop();
+			await refreshWorkshop(true);
 		} else {
 			await askConfirm({ title: '安装失败', message: res.message || '未知错误' });
 		}
@@ -158,26 +158,34 @@ export function createWorkshopManager({ askConfirm }) {
 		bindRowActions();
 	}
 
-	async function refreshWorkshop() {
+	// 列表内存缓存：切页回来直接用上次结果，只有「刷新列表」/安装完成才重新访问 GitHub
+	let loaded = false;
+
+	async function refreshWorkshop(force) {
 		const el = listEl();
 		if (!el) return;
-		el.innerHTML = renderWorkshopLoading();
 		try {
 			const running = normResponse(await desktopApi.isGameRunning());
 			gameRunning = !!(running.ok && running.data);
 		} catch (e) { gameRunning = false; }
+		if (!force && loaded && mods.length) {
+			renderList();
+			return;
+		}
+		el.innerHTML = renderWorkshopLoading();
 		const res = normResponse(await desktopApi.getStoreList());
 		if (!res.ok) {
 			el.innerHTML = renderWorkshopError(res.message);
 			return;
 		}
 		mods = (res.data && res.data.mods) || [];
+		loaded = true;
 		renderList();
 	}
 
 	function bindEvents() {
 		const btn = document.getElementById('btn-workshop-refresh');
-		if (btn) btn.onclick = () => refreshWorkshop();
+		if (btn) btn.onclick = () => refreshWorkshop(true);
 		const search = document.getElementById('workshop-search');
 		if (search) {
 			search.oninput = () => {

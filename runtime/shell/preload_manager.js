@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('desktopUI', {
 	getAppInfo: () => invoke('mgr:getAppInfo'),
 	checkForUpdate: (beta) => invoke('mgr:checkForUpdate', beta),
 	downloadAndApplyUpdate: (beta) => invoke('mgr:downloadAndApplyUpdate', beta),
+	downloadAndRunInstaller: (beta) => invoke('mgr:downloadAndRunInstaller', beta),
 	cancelUpdate: () => invoke('mgr:cancelUpdate'),
 	onUpdateProgress(callback) {
 		const listener = (_e, payload) => callback(payload);

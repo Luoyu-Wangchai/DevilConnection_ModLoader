@@ -24,12 +24,13 @@ function readVersionInfo() {
 				version: String(j.version || '0.0.0'),
 				beta: !!j.beta,
 				loaderVersion: (typeof j.loaderVersion === 'number' && isFinite(j.loaderVersion)) ? j.loaderVersion : null,
+				shellVersion: (typeof j.shellVersion === 'number' && isFinite(j.shellVersion)) ? j.shellVersion : 1,
 				repo: String(j.repo || DEFAULT_REPO),
 				name: String(j.name || 'DevilConnection ModLoader')
 			};
 		}
 	} catch (e) {}
-	return { version: '0.0.0', beta: false, loaderVersion: null, repo: DEFAULT_REPO, name: 'DevilConnection ModLoader' };
+	return { version: '0.0.0', beta: false, loaderVersion: null, shellVersion: 1, repo: DEFAULT_REPO, name: 'DevilConnection ModLoader' };
 }
 function displayVersion(v) { return (v.beta ? 'BRV' : 'RV') + v.version; }
 
@@ -799,6 +800,14 @@ async function checkForUpdate(betaEnabled) {
 		}
 		const t = picked.target;
 		const ua = updateAssetsOf(t);
+		// 壳版本检测：远端 update.json 的 shellVersion 高于本地 → 该版动了核心文件（app.asar），无法直升
+		let shellChanged = false;
+		if (ua.manifest) {
+			try {
+				const m = await (await fetch(ua.manifest.url, { headers: ghHeaders(), signal: ctrl.signal })).json();
+				if (m && typeof m.shellVersion === 'number' && m.shellVersion > (v.shellVersion || 1)) shellChanged = true;
+			} catch (e) {}
+		}
 		return ok({
 			hasUpdate: true,
 			current: displayVersion(v),
@@ -807,7 +816,8 @@ async function checkForUpdate(betaEnabled) {
 			notes: t.notes,
 			publishedAt: t.publishedAt,
 			reason: picked.reason,                      // 'newer' | 'leaveBeta'
-			canAutoUpdate: !!(ua.zip && ua.manifest)    // release 带 update.zip+update.json 才能一键更新
+			shellChanged,                               // true = 新版动了壳，只能走安装器
+			canAutoUpdate: !!(ua.zip && ua.manifest && !shellChanged)
 		});
 	} catch (e) {
 		return fail(e.name === 'AbortError' ? '检查更新超时, 请检查网络' : (e.message || '网络错误'), 'network');
@@ -838,6 +848,9 @@ async function downloadAndApplyUpdate(sender, betaEnabled) {
 		if (!ua.zip || !ua.manifest) return fail('该版本未提供自动更新包', 'noAsset');
 
 		const manifest = await (await fetch(ua.manifest.url, { headers: ghHeaders(), signal: ctrl.signal })).json();
+		if (manifest && typeof manifest.shellVersion === 'number' && manifest.shellVersion > (v.shellVersion || 1)) {
+			return fail('该版本更新了核心文件，无法一键直升，请前往 GitHub 下载最新 Installer', 'shellChanged');
+		}
 		const wantSha = String((manifest && manifest.sha256) || '').toLowerCase();
 
 		send({ phase: 'download', pct: 0, text: '正在下载更新包...' });
@@ -917,6 +930,71 @@ async function downloadAndApplyUpdate(sender, betaEnabled) {
 function cancelUpdate() {
 	try { if (updateAbort) updateAbort.abort(); } catch (e) {}
 	return ok();
+}
+
+// 脱离 Electron job object 拉起进程（§18.6：detached spawn 会被 job 连带杀；WMI Win32_Process.Create 由 WmiPrvSE 创建，天然脱离）
+// EncodedCommand 绕过命令行编码，安全携带含中文/空格的路径
+function launchDetached(exePath, cfgPath) {
+	const { spawn } = require('child_process');
+	const cmdLine = `"${exePath}" --auto --config "${cfgPath}"`.replace(/'/g, "''");
+	const psScript = `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${cmdLine}' } | Out-Null`;
+	const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+	const child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { windowsHide: true, stdio: 'ignore' });
+	child.unref();
+}
+
+// 动壳版本自动升级：下载最新 Installer exe → 脱离 job 拉起(--auto) → 加载器自我退出 → Installer 装完重启游戏
+async function downloadAndRunInstaller(sender, betaEnabled) {
+	if (updateAbort) return fail('已有更新任务进行中', 'busy');
+	if (!ModCore || !ModCore.pickUpdateTarget) return fail('版本模块缺失, 请重装加载器', 'nocore');
+	const send = (p) => { try { if (sender && !sender.isDestroyed()) sender.send('mgr:updateProgress', p); } catch (e) {} };
+	const ctrl = new AbortController();
+	updateAbort = ctrl;
+	try {
+		send({ phase: 'check', pct: 0, text: '正在获取安装器信息...' });
+		const v = readVersionInfo();
+		const { status, releases } = await fetchReleases(v.repo, ctrl.signal);
+		if (releases === null || !releases.length) return fail('获取版本信息失败 (HTTP ' + status + ')', 'http');
+		const picked = ModCore.pickUpdateTarget({ version: v.version, beta: v.beta }, releases, !!betaEnabled);
+		if (!picked.hasUpdate || !picked.target) return fail('没有可用的更新', 'noupdate');
+		const t = picked.target;
+		const exeAsset = (t.assets || []).find(a => /Installer\.exe$/i.test(a.name)) || (t.assets || []).find(a => /\.exe$/i.test(a.name));
+		if (!exeAsset || !exeAsset.url) return fail('该版本未提供安装器 exe', 'noexe');
+
+		send({ phase: 'download', pct: 0, text: '正在下载安装器...' });
+		const resp = await fetch(exeAsset.url, { signal: ctrl.signal });
+		if (!resp.ok || !resp.body) return fail('下载失败 (HTTP ' + resp.status + ')', 'download');
+		const total = Number(resp.headers.get('content-length')) || exeAsset.size || 0;
+		const reader = resp.body.getReader();
+		const chunks = [];
+		let received = 0;
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(Buffer.from(value));
+			received += value.length;
+			send({ phase: 'download', pct: total ? Math.min(99, Math.round(received / total * 100)) : null, received, total, text: '正在下载安装器...' });
+		}
+		const buf = Buffer.concat(chunks);
+
+		const os = require('os');
+		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dcml_up_'));
+		const exePath = path.join(tmpDir, 'DevilConnectionModLoaderInstaller.exe');
+		fs.writeFileSync(exePath, buf);
+		const gameExe = path.join(gameRoot(), 'DevilConnection.exe');
+		const cfgPath = path.join(tmpDir, 'autoupdate.json');
+		fs.writeFileSync(cfgPath, JSON.stringify({ gameExe, waitPid: process.pid, relaunch: true, repo: v.repo, beta: !!betaEnabled }), 'utf8');
+
+		send({ phase: 'apply', pct: 100, text: '正在启动安装器，加载器即将退出以完成更新...' });
+		launchDetached(exePath, cfgPath);
+		setTimeout(() => { try { require('electron').app.quit(); } catch (e) {} }, 1500);
+		return ok({ launched: true });
+	} catch (e) {
+		if (e.name === 'AbortError') return fail('更新已取消', 'cancelled');
+		return fail(e.message || '更新失败');
+	} finally {
+		updateAbort = null;
+	}
 }
 
 function ghHeaders() { return { 'User-Agent': 'DevilConnection-ModLoader', 'Accept': 'application/vnd.github+json' }; }
@@ -1182,6 +1260,7 @@ function setup(deps) {
 		'mgr:getAppInfo': () => getAppInfo(),
 		'mgr:checkForUpdate': (e, beta) => checkForUpdate(!!beta),
 		'mgr:downloadAndApplyUpdate': (e, beta) => downloadAndApplyUpdate(e.sender, !!beta),
+		'mgr:downloadAndRunInstaller': (e, beta) => downloadAndRunInstaller(e.sender, !!beta),
 		'mgr:cancelUpdate': () => cancelUpdate(),
 		'mgr:checkModUpdate': (e, idx) => checkModUpdate(idx),
 		'mgr:updateMod': (e, idx) => updateMod(idx),
