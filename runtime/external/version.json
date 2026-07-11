@@ -1,7 +1,7 @@
 {
-  "version": "1.2.7",
-  "beta": false,
-  "loaderVersion": 127,
-  "name": "DevilConnection ModLoader",
-  "repo": "Luoyu-Wangchai/DevilConnection_ModLoader"
+	"version": "1.2.8-3CB3A577B8",
+	"beta": true,
+	"loaderVersion": 128,
+	"name": "DevilConnection ModLoader",
+	"repo": "Luoyu-Wangchai/DevilConnection_ModLoader"
 }
