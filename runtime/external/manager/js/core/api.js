@@ -39,6 +39,15 @@ export const desktopApi = {
 	updateMod(idx) {
 		return window.desktopUI.updateMod(idx);
 	},
+	getStoreList() {
+		return window.desktopUI.getStoreList();
+	},
+	storeInstall(repo, tag) {
+		return window.desktopUI.storeInstall(repo, tag);
+	},
+	storeHistory(repo) {
+		return window.desktopUI.storeHistory(repo);
+	},
 	getModConfig(idx) {
 		return window.desktopUI.getModConfig(idx);
 	},

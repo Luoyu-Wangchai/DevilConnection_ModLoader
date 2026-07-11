@@ -5,16 +5,19 @@ import { createModal } from './ui/modal.js';
 import { createNavigation } from './ui/navigation.js';
 import { createModsManager } from './features/mods/index.js';
 import { createBackupsManager } from './features/backups/index.js';
+import { createWorkshopManager } from './features/workshop/index.js';
 
 const { askConfirm } = createModal();
 const { runTask, dispose, isBusy } = createTaskRunner({ askConfirm });
 
 const modsManager = createModsManager({ askConfirm });
 const backupsManager = createBackupsManager({ askConfirm, runTask, isBusy });
+const workshopManager = createWorkshopManager({ askConfirm });
 
 const navigation = createNavigation({
 	onMods: modsManager.refreshMods,
-	onBackups: backupsManager.refreshBackups
+	onBackups: backupsManager.refreshBackups,
+	onWorkshop: workshopManager.refreshWorkshop
 });
 
 window.switchPage = navigation.switchPage;
@@ -22,6 +25,7 @@ window.switchPage = navigation.switchPage;
 modsManager.bindImportButton();
 modsManager.bindDropImport();
 backupsManager.bindEvents();
+workshopManager.bindEvents();
 navigation.bindNavButtons();
 
 // 上游原作者仓库（致谢用，指向 fork 来源）

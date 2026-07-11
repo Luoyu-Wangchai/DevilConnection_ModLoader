@@ -1,4 +1,4 @@
-export function createNavigation({ onMods, onBackups }) {
+export function createNavigation({ onMods, onBackups, onWorkshop }) {
 	async function switchPage(pageId) {
 		document.querySelectorAll('.nav-item').forEach(el => {
 			el.classList.toggle('active', el.dataset.pageBtn === pageId);
@@ -8,6 +8,7 @@ export function createNavigation({ onMods, onBackups }) {
 		});
 		if (pageId === 'mods') await onMods();
 		if (pageId === 'backups') await onBackups();
+		if (pageId === 'workshop' && onWorkshop) await onWorkshop();
 	}
 
 	function bindNavButtons() {

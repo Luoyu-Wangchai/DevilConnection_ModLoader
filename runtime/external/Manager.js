@@ -996,6 +996,143 @@ async function updateMod(idx) {
 	}
 }
 
+// ---- 模组工坊（商店页：本地模板 + 云端 store.json 数据）----
+// store.json 由王柴在 DCML 主仓库维护（收录=留名）；本地只渲染数据，绝不执行云端代码
+function storeSourceUrl() {
+	const o = updateOverride();
+	if (o && o.storeUrl) return String(o.storeUrl);
+	const repo = readVersionInfo().repo || 'Luoyu-Wangchai/DevilConnection_ModLoader';
+	return `https://raw.githubusercontent.com/${repo}/main/store.json`;
+}
+
+// 查单个收录模组的云端最新版本（release manifest *.update.json 的数字 version）
+async function fetchStoreRemote(repo, signal) {
+	const relResp = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: ghHeaders(), signal });
+	if (relResp.status === 404) return { state: 'noRelease' };
+	if (!relResp.ok) return { state: 'error', http: relResp.status };
+	const rel = await relResp.json();
+	const assets = rel.assets || [];
+	let ver = null, display = rel.tag_name || null;
+	const mf = assets.find(a => /\.update\.json$/i.test(a.name));
+	if (mf) {
+		try {
+			const m = await (await fetch(mf.browser_download_url, { headers: ghHeaders(), signal })).json();
+			if (m && typeof m.version === 'number') ver = m.version;
+			if (m && m.displayVersion) display = String(m.displayVersion);
+		} catch (e) {}
+	}
+	return { state: 'ok', ver, display, tag: rel.tag_name || null };
+}
+
+async function getStoreList() {
+	const ctrl = new AbortController();
+	const timer = setTimeout(() => ctrl.abort(), 15000);
+	try {
+		const resp = await fetch(storeSourceUrl(), { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
+		if (!resp.ok) return fail(`商店清单获取失败 (HTTP ${resp.status})`, 'http');
+		const store = await resp.json();
+		const list = Array.isArray(store) ? store : (store.mods || []);
+		const installed = effectiveMods();
+		const byBare = new Map(installed.map(m => [m.bareName, m]));
+		const out = await Promise.all(list.slice(0, 50).map(async (s) => {
+			const item = {
+				id: String(s.id || ''), name: String(s.name || s.id || ''),
+				desc: String(s.desc || s.description || ''), author: String(s.author || ''),
+				repo: String(s.repo || ''),
+				installed: false, localVer: null, localDisplay: null, disabled: false,
+				remoteVer: null, remoteDisplay: null, remoteTag: null, status: 'unknown'
+			};
+			const local = byBare.get(item.id);
+			if (local) {
+				item.installed = true;
+				item.localVer = local.versionNum;
+				item.localDisplay = local.versionText;
+				item.disabled = !!local.disabled;
+			}
+			if (item.repo) {
+				try {
+					const r = await fetchStoreRemote(item.repo, ctrl.signal);
+					if (r.state === 'ok') { item.remoteVer = r.ver; item.remoteDisplay = r.display; item.remoteTag = r.tag; }
+					else if (r.state === 'noRelease') item.status = 'noRelease';
+				} catch (e) {}
+			}
+			if (item.status !== 'noRelease') {
+				if (!item.installed) item.status = 'notinstalled';
+				else if (item.remoteVer === null || item.localVer === null || item.localVer === undefined) item.status = 'unknown';
+				else item.status = item.localVer < item.remoteVer ? 'outdated' : (item.localVer > item.remoteVer ? 'ahead' : 'current');
+			}
+			return item;
+		}));
+		return ok({ mods: out });
+	} catch (e) {
+		if (e.name === 'AbortError') return fail('连接超时，请检查网络', 'timeout');
+		return fail(e.message);
+	} finally { clearTimeout(timer); }
+}
+
+// 安装/更新/降级：下载指定 release（缺省 latest）的 .asar → 复用导入管线（保留前缀/启停/config）
+async function storeInstallRelease(repo, tag) {
+	if (!repo) return fail('缺少仓库参数');
+	if (isGameRunning()) return fail('游戏运行中，请先关闭游戏再安装或更新模组', 'running');
+	const ctrl = new AbortController();
+	const timer = setTimeout(() => ctrl.abort(), 120000);
+	try {
+		const url = tag
+			? `https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`
+			: `https://api.github.com/repos/${repo}/releases/latest`;
+		const relResp = await fetch(url, { headers: ghHeaders(), signal: ctrl.signal });
+		if (!relResp.ok) return fail(`获取 release 失败 (HTTP ${relResp.status})`);
+		const rel = await relResp.json();
+		const assets = rel.assets || [];
+		let assetName = null;
+		const mf = assets.find(a => /\.update\.json$/i.test(a.name));
+		if (mf) {
+			try {
+				const m = await (await fetch(mf.browser_download_url, { headers: ghHeaders(), signal: ctrl.signal })).json();
+				if (m && m.asset) assetName = String(m.asset);
+			} catch (e) {}
+		}
+		const asarAsset = (assetName && assets.find(a => a.name === assetName)) || assets.find(a => /\.asar$/i.test(a.name));
+		if (!asarAsset) return fail('该 release 未提供 .asar 资产');
+		const dl = await fetch(asarAsset.browser_download_url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
+		if (!dl.ok) return fail(`下载失败 (HTTP ${dl.status})`);
+		const buf = Buffer.from(new Uint8Array(await dl.arrayBuffer()));
+		const r = stageAsarImport(asarAsset.name, buf);
+		if (r.status === 'invalid') return fail(r.message || '下载的模组文件无效');
+		if (r.status === 'added') return ok({ installed: true, kind: 'added', tag: rel.tag_name });
+		const c = confirmPendingImport(r.token);
+		if (!c.ok) return c;
+		return ok({ installed: true, kind: r.kind, tag: rel.tag_name });
+	} catch (e) {
+		if (e.name === 'AbortError') return fail('下载超时', 'timeout');
+		return fail(e.message);
+	} finally { clearTimeout(timer); }
+}
+
+// 历史版本列表（供降级/回滚选择）
+async function storeHistory(repo) {
+	if (!repo) return fail('缺少仓库参数');
+	const ctrl = new AbortController();
+	const timer = setTimeout(() => ctrl.abort(), 12000);
+	try {
+		const resp = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=15`, { headers: ghHeaders(), signal: ctrl.signal });
+		if (!resp.ok) return fail(`GitHub 返回 ${resp.status}`);
+		const rels = await resp.json();
+		return ok({
+			releases: (Array.isArray(rels) ? rels : []).map(r => ({
+				tag: r.tag_name,
+				name: r.name || r.tag_name,
+				prerelease: !!r.prerelease,
+				date: r.published_at ? String(r.published_at).slice(0, 10) : '',
+				hasAsar: (r.assets || []).some(a => /\.asar$/i.test(a.name))
+			}))
+		});
+	} catch (e) {
+		if (e.name === 'AbortError') return fail('连接超时', 'timeout');
+		return fail(e.message);
+	} finally { clearTimeout(timer); }
+}
+
 function setup(deps) {
 	D = deps;
 	AdmZip = deps.admZip;
@@ -1021,6 +1158,9 @@ function setup(deps) {
 		'mgr:cancelUpdate': () => cancelUpdate(),
 		'mgr:checkModUpdate': (e, idx) => checkModUpdate(idx),
 		'mgr:updateMod': (e, idx) => updateMod(idx),
+		'mgr:getStoreList': () => getStoreList(),
+		'mgr:storeInstall': (e, repo, tag) => storeInstallRelease(String(repo || ''), tag ? String(tag) : null),
+		'mgr:storeHistory': (e, repo) => storeHistory(String(repo || '')),
 
 		'mgr:autoBackup': (e, s) => autoBackup(s),
 		'mgr:getBackupsData': () => getBackupsData(),

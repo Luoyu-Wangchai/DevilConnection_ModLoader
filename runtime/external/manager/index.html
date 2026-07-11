@@ -58,6 +58,10 @@
 				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
 				<span class="hidden sm:inline">模组</span>
 			</div>
+			<div data-page-btn="workshop" class="nav-item flex-1 md:flex-none justify-center md:justify-start">
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+				<span class="hidden sm:inline">工坊</span>
+			</div>
 			<div data-page-btn="backups" class="nav-item flex-1 md:flex-none justify-center md:justify-start">
 				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 				<span class="hidden sm:inline">备份</span>
@@ -123,6 +127,24 @@
 					<span>模组列表</span><span class="hidden sm:block">操作</span>
 				</div>
 				<div id="mod-list" class="divide-y divide-slate-100"><div class="p-10 text-center text-slate-400">正在加载模组...</div></div>
+			</div>
+		</section>
+		<section id="page-workshop" class="page-container p-4 md:p-8">
+			<header class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6 md:mb-8">
+				<div class="min-w-0">
+					<h2 class="text-2xl md:text-3xl font-bold">模组工坊</h2>
+					<p class="text-xs md:text-sm text-slate-400 mt-2">由王柴收集整理的社区模组 · 版本信息实时来自 GitHub</p>
+					<p class="text-[11px] text-amber-600 mt-1">安装与更新需在游戏关闭时进行 · 安装后可在「模组」页调整加载顺序</p>
+				</div>
+				<div class="flex flex-col gap-2 shrink-0 w-full md:w-auto">
+					<button id="btn-workshop-refresh" class="btn-secondary whitespace-nowrap">刷新列表</button>
+				</div>
+			</header>
+			<div class="card p-0 overflow-hidden">
+				<div class="bg-slate-50/50 px-4 md:px-6 py-2 md:py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex justify-between">
+					<span>收录模组</span><span class="hidden sm:block">操作</span>
+				</div>
+				<div id="workshop-list" class="divide-y divide-slate-100"><div class="p-10 text-center text-slate-400">正在连接工坊...</div></div>
 			</div>
 		</section>
 		<section id="page-backups" class="page-container p-4 md:p-8">

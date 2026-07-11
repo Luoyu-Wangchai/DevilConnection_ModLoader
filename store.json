@@ -1,0 +1,32 @@
+{
+	"mods": [
+		{
+			"id": "dc_theatre",
+			"name": "库皮哒呀小剧场",
+			"desc": "登上小剧场舞台，与库皮亚和德比伦即兴聊天互动！",
+			"author": "王柴",
+			"repo": "Luoyu-Wangchai/DevilConnection_Theatre"
+		},
+		{
+			"id": "dc_kupya_plus",
+			"name": "库皮亚交互增强",
+			"desc": "后日谈的库皮亚新增一些台词；收藏室书架上必定出现小憩的库皮亚，且可以互动",
+			"author": "王柴",
+			"repo": "Luoyu-Wangchai/DevilConnection_KupyaPlus"
+		},
+		{
+			"id": "dc_liteload",
+			"name": "轻量加载补丁",
+			"desc": "动画懒加载，能大幅降低游戏内存占用",
+			"author": "王柴",
+			"repo": "Luoyu-Wangchai/DevilConnection_LiteLoad"
+		},
+		{
+			"id": "dc_doeru_plus",
+			"name": "更多二世多艾露",
+			"desc": "第一周目第0天强制触发二世多艾露的专属剧情，由多艾尔替代库皮亚登场！",
+			"author": "王柴 & Bob69693",
+			"repo": "Luoyu-Wangchai/DevilConnection_DoeruPlus"
+		}
+	]
+}
