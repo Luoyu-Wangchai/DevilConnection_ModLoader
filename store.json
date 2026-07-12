@@ -27,6 +27,13 @@
 			"desc": "第一周目第0天强制触发二世多艾露的专属剧情，由多艾尔替代库皮亚登场！",
 			"author": "王柴 & Bob69693",
 			"repo": "Luoyu-Wangchai/DevilConnection_DoeruPlus"
+		},
+		{
+			"id": "dc_translate_zh_cn",
+			"name": "简体中文汉化补丁",
+			"desc": "古今狐白日语社《恶魔连结》Ver1.01 汉化补丁 三次修改版",
+			"author": "古今狐白日语社 / 王柴(三改)",
+			"repo": "Luoyu-Wangchai/DevilConnection_cn_dirty_txt"
 		}
 	]
 }
