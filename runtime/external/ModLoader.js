@@ -467,12 +467,23 @@ const ScriptInjection = {
 				const base = path.basename(plugin);
 				if (base.toLowerCase() === TARGET_ASAR_BODY) return;
 				if (PluginManager.norm(plugin).startsWith(PluginManager.norm(PluginManager.insideDir))) return;
-				let meta = null;
+				let meta = null, logo = null;
 				if (ModCore) {
 					try {
 						const raw = ModCore.readAsarInner(ofs, plugin, 'mods.json');
 						if (raw) meta = JSON.parse(raw.toString('utf8'));
 					} catch (e) {}
+					// 图标：mods.json 的 icon 字段（asar 内相对路径）优先，根目录 logo.png 兜底；
+					// 存为相对游戏页面的 URL（Electron file 协议可透明读 asar 内文件），避免大图 base64 膨胀注入脚本
+					const iconRel = (meta && typeof meta.icon === 'string' && meta.icon)
+						? String(meta.icon).replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '')
+						: null;
+					for (const rel of (iconRel ? [iconRel, 'logo.png'] : ['logo.png'])) {
+						try {
+							const lg = ModCore.readAsarInner(ofs, plugin, rel);
+							if (lg && lg.length) { logo = '../plugins/' + base + '/' + rel; break; }
+						} catch (e) {}
+					}
 				}
 				modlist.push({
 					file: base,
@@ -480,6 +491,7 @@ const ScriptInjection = {
 					name: (meta && meta.name) || null,
 					description: (meta && meta.description) || null,
 					displayVersion: (meta && (meta.displayVersion || (meta.version != null ? 'v' + meta.version : null))) || null,
+					logo: logo,
 					hasMeta: !!meta
 				});
 			});

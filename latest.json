@@ -1,21 +1,20 @@
 {
 	"stable": {
-		"version": "1.2.7",
+		"version": "1.2.8",
 		"beta": false,
-		"shellVersion": 1,
-		"tag": "RV1.2.7",
+		"shellVersion": 3,
+		"tag": "RV1.2.8",
 		"notes": "稳定版",
-		"installer": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/RV1.2.7/DevilConnectionModLoaderInstaller.exe"
+		"installer": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/RV1.2.8/DevilConnectionModLoaderInstaller.exe",
+		"runtimeZip": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/RV1.2.8/runtime.zip"
 	},
 	"beta": {
-		"version": "1.2.8-3CB3A637DC",
-		"beta": true,
+		"version": "1.2.8",
+		"beta": false,
 		"shellVersion": 3,
-		"tag": "BRV1.2.8-3CB3A637DC",
-		"notes": "raw化模组清单，解决一下匿名API限制的问题",
-		"installer": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.8-3CB3A637DC/DevilConnectionModLoaderInstaller.exe",
-		"updateZip": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.8-3CB3A637DC/update.zip",
-		"updateJson": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.8-3CB3A637DC/update.json",
-		"runtimeZip": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.8-3CB3A637DC/runtime.zip"
+		"tag": "RV1.2.8",
+		"notes": "稳定版",
+		"installer": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/RV1.2.8/DevilConnectionModLoaderInstaller.exe",
+		"runtimeZip": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/RV1.2.8/runtime.zip"
 	}
 }
