@@ -27,3 +27,16 @@ export function escapeHtml(text) {
 		.replace(/"/g, '&quot;')
 		.replace(/'/g, '&#39;');
 }
+
+// 弹系统文件选择框（模组导入 / 备份导入共用）。multiple=false 回调单个 File，multiple=true 回调 File 数组。
+export function pickFiles({ accept, multiple = false, onSelected }) {
+	const input = document.createElement('input');
+	input.type = 'file';
+	input.accept = accept;
+	if (multiple) input.multiple = true;
+	input.onchange = async () => {
+		const files = [...input.files];
+		if (files.length) await onSelected(multiple ? files : files[0]);
+	};
+	input.click();
+}

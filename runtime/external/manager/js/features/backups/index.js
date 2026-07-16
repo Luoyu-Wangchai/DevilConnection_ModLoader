@@ -1,5 +1,5 @@
 import { desktopApi } from '../../core/api.js';
-import { normResponse, normalizePositiveInt } from '../../core/utils.js';
+import { normResponse, normalizePositiveInt, pickFiles } from '../../core/utils.js';
 import {
 	renderBackupFetchError,
 	renderBackupEmpty,
@@ -53,7 +53,7 @@ export function createBackupsManager({ askConfirm, runTask, isBusy }) {
 		const settings = {
 			auto_backup_enabled: autoToggle.dataset.enabled === 'true',
 			auto_backup_keep_days: normalizePositiveInt(document.getElementById('keep-days').value, 7),
-			auto_backup_max_count: normalizePositiveInt(document.getElementById('max-count').value, 10)
+			auto_backup_max_count: normalizePositiveInt(document.getElementById('max-count').value, 15)
 		};
 		writeBackupSettingsToLocal(settings);
 	}
@@ -61,18 +61,6 @@ export function createBackupsManager({ askConfirm, runTask, isBusy }) {
 	function renderBackupTitle(item) {
 		if (item.customName) return item.customName;
 		return '自动备份';
-	}
-
-	function pickFile({ accept, onSelected }) {
-		const input = document.createElement('input');
-		input.type = 'file';
-		input.accept = accept;
-		input.onchange = async () => {
-			const file = input.files[0];
-			if (!file) return;
-			await onSelected(file);
-		};
-		input.click();
 	}
 
 	async function runTaskAndRefresh(taskName, action) {
@@ -89,7 +77,7 @@ export function createBackupsManager({ askConfirm, runTask, isBusy }) {
 			const settings = loadBackupSettingsFromLocal();
 			applyAutoToggleUI(settings.auto_backup_enabled);
 			document.getElementById('keep-days').value = settings.auto_backup_keep_days || 7;
-			document.getElementById('max-count').value = settings.auto_backup_max_count || 10;
+			document.getElementById('max-count').value = settings.auto_backup_max_count || 15;
 			writeBackupSettingsToLocal(settings);
 
 			if (!settings.auto_backup_enabled) {
@@ -124,9 +112,9 @@ export function createBackupsManager({ askConfirm, runTask, isBusy }) {
 	function bindBackupRowActions(row, item, title) {
 		row.querySelector('[data-a="restore"]').onclick = async () => {
 			if (await askConfirm({ title: '恢复确认', message: `确定要恢复 "${title}" 吗？` })) {
-				await runTask('恢复存档', async ({ setProgress, taskId }) => {
+				await runTaskAndRefresh('恢复存档', async ({ setProgress }) => {
 					setProgress(30, '正在恢复存档...');
-					return await desktopApi.restoreBackup(item.name, taskId);
+					return await desktopApi.restoreBackup(item.name);
 				});
 			}
 		};
@@ -155,9 +143,9 @@ export function createBackupsManager({ askConfirm, runTask, isBusy }) {
 
 		row.querySelector('[data-a="export"]').onclick = async () => {
 			if (isBusy()) return;
-			await runTask('导出备份', async ({ setProgress, taskId }) => {
+			await runTask('导出备份', async ({ setProgress }) => {
 				setProgress(15, '正在打开导出对话框...');
-				const r = await desktopApi.exportBackupFile(item.name, taskId);
+				const r = await desktopApi.exportBackupFile(item.name);
 				if (r?.ok) return { ok: true, message: `导出成功：${r.data?.path}` };
 				if (r?.reason === 'cancel') return { ok: false, kind: 'info', message: '已取消导出' };
 				return { ok: false, message: `导出失败：${r?.message || '未知错误'}` };
@@ -167,8 +155,10 @@ export function createBackupsManager({ askConfirm, runTask, isBusy }) {
 		row.querySelector('[data-a="delete"]').onclick = async () => {
 			if (item.isLocked) return;
 			if (await askConfirm({ title: '删除确认', message: '删除后无法找回！' })) {
-				await desktopApi.deleteBackup(item.name);
-				refreshBackups();
+				await runTaskAndRefresh('删除备份', async ({ setProgress }) => {
+					setProgress(30, '正在删除...');
+					return await desktopApi.deleteBackup(item.name);
+				});
 			}
 		};
 	}
@@ -224,22 +214,21 @@ export function createBackupsManager({ askConfirm, runTask, isBusy }) {
 
 			if (res !== null) {
 				const finalName = String(res).trim() || defaultName;
-				await runTaskAndRefresh('备份中', async ({ setProgress, taskId }) => {
+				await runTaskAndRefresh('备份中', async ({ setProgress }) => {
 					setProgress(30, '打包数据...');
-					return await desktopApi.backupNow(taskId, finalName);
+					return await desktopApi.backupNow(finalName);
 				});
 			}
 		};
 
 		document.getElementById('btn-import-backup').onclick = () => {
-			pickFile({
+			pickFiles({
 				accept: '.zip',
 				onSelected: async (file) => {
-					await runTaskAndRefresh('导入中', async ({ taskId }) => {
+					await runTaskAndRefresh('导入中', async () => {
 						return await desktopApi.importBackupFromBuffer(
 							file.name,
-							new Uint8Array(await file.arrayBuffer()),
-							taskId
+							new Uint8Array(await file.arrayBuffer())
 						);
 					});
 				}
@@ -248,9 +237,9 @@ export function createBackupsManager({ askConfirm, runTask, isBusy }) {
 
 		document.getElementById('btn-export-current').onclick = async () => {
 			if (isBusy()) return;
-			await runTask('导出当前存档', async ({ setProgress, taskId }) => {
+			await runTask('导出当前存档', async ({ setProgress }) => {
 				setProgress(20, '正在打开导出对话框...');
-				const r = await desktopApi.exportCurrentSave(taskId);
+				const r = await desktopApi.exportCurrentSave();
 				if (r?.ok) return { ok: true, message: `导出成功：${r.data?.path}` };
 				if (r?.reason === 'empty') return { ok: false, message: r?.message || '导出失败：当前没有存档' };
 				if (r?.reason === 'cancel') return { ok: false, kind: 'info', message: '已取消导出' };

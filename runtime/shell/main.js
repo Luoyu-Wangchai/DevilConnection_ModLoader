@@ -14,7 +14,6 @@ import {
 import {
 	existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync
 } from 'fs';
-import { initialize, enable } from '@electron/remote/main/index.js';
 import { safeStorage } from 'electron/main';
 import { EOL } from 'os';
 import { format } from 'url';
@@ -49,14 +48,7 @@ try {
 
 let loaderWindow = null;
 let gameWindow = null;
-let remoteInitialized = false;
 app.commandLine.appendSwitch('js-flags', '--expose-gc');
-
-function ensureRemoteInitialized() {
-	if (remoteInitialized) return;
-	initialize();
-	remoteInitialized = true;
-}
 
 const scSize = { width: 1280, height: 960 };
 
@@ -91,7 +83,6 @@ try {
 
 function createLoaderWindow() {
 	if (loaderWindow && !loaderWindow.isDestroyed()) { loaderWindow.show(); loaderWindow.focus(); return; }
-	ensureRemoteInitialized();
 	loaderWindow = new BrowserWindow({
 		width: 980, height: 680, minWidth: 720, minHeight: 520,
 		title: 'DevilConnection ModLoader',
@@ -109,7 +100,6 @@ function createLoaderWindow() {
 }
 
 function createGameWindow() {
-	ensureRemoteInitialized();
 	gameWindow = new BrowserWindow({
 		width: 1280, height: 960, minWidth: 960, minHeight: 720,
 		useContentSize: true,
@@ -127,9 +117,6 @@ function createGameWindow() {
 	});
 	gameWindow.loadURL(indexUrl);
 	gameWindow.removeMenu();
-	gameWindow.on('close', function () {
-		if (!gameWindow.isDestroyed()) gameWindow.webContents.send('asynchronous-message', 'closeWindow');
-	});
 	gameWindow.on('closed', () => { gameWindow = null; });
 }
 
@@ -139,7 +126,11 @@ ipcMain.handle('app:launchGame', async () => {
 		if (loaderWindow && !loaderWindow.isDestroyed()) loaderWindow.close();
 		return { ok: true };
 	}
-	try { if (ML && typeof ML.loadPlugins === 'function') ML.loadPlugins(); }
+	// 壳自身没有 index.html，游戏画面全靠 ModLoader 的协议拦截重定向到 app.bak.asar；ML 加载失败时开窗只会得到白屏，直接如实报错
+	if (!ML || typeof ML.installHooks !== 'function') {
+		return { ok: false, message: '加载器核心 ModLoader.js 加载失败，无法启动游戏，请重新安装加载器。' };
+	}
+	try { if (typeof ML.loadPlugins === 'function') ML.loadPlugins(); }
 	catch (e) { console.error('[壳] 加载插件失败', e); }
 	createGameWindow();
 	gameWindow.webContents.once('did-finish-load', () => {
@@ -151,7 +142,7 @@ ipcMain.handle('app:launchGame', async () => {
 app.on('ready', () => {
 	createLoaderWindow();
 	try {
-		globalShortcut.register('F10', () => {
+		const okF10 = globalShortcut.register('F10', () => {
 			if (loaderWindow && !loaderWindow.isDestroyed()) {
 				if (loaderWindow.isMinimized()) { loaderWindow.restore(); loaderWindow.focus(); }
 				else if (loaderWindow.isVisible()) { loaderWindow.hide(); }
@@ -160,14 +151,13 @@ app.on('ready', () => {
 				createLoaderWindow();
 			}
 		});
-	} catch (e) {  }
+		if (!okF10) console.warn('[壳] F10 快捷键注册失败（可能被其他程序占用），可重启加载器或从任务栏重新打开管理器');
+	} catch (e) { console.warn('[壳] F10 快捷键注册异常', e); }
 });
 
 app.on('will-quit', () => { try { globalShortcut.unregisterAll(); } catch (e) {} });
 
 app.on('browser-window-created', (_event, window) => {
-	ensureRemoteInitialized();
-	enable(window.webContents);
 	window.webContents.setWindowOpenHandler(({ url }) => {
 		shell.openExternal(url);
 		return { action: 'deny' };
@@ -186,7 +176,7 @@ ipcMain.on('decrypt', async (event, encryptedBuffer) => { event.returnValue = sa
 
 ipcMain.handle('saveFile', async (event, { title, dataUrl }) => {
 	const result = await dialog.showSaveDialog(activeWindow(), {
-		title, filters: [{ name: 'PNG画像', extensions: 'png' }], defaultPath: 'photo.png'
+		title, filters: [{ name: 'PNG画像', extensions: ['png'] }], defaultPath: 'photo.png'
 	});
 	if (result.canceled) return null;
 	const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
@@ -237,6 +227,7 @@ ipcMain.handle('debug:isMuteAudio', async (event, mute) => {
 	else return await gameWindow.webContents.audioMuted;
 });
 ipcMain.handle('debug:captureWindow', async (event, x, y, width, height) => {
+	if (!gameWindow || gameWindow.isDestroyed()) return null;
 	const screenshot = await gameWindow.capturePage({ x, y, width, height });
 	return screenshot.resize({ ...scSize }).toDataURL();
 });
@@ -256,5 +247,6 @@ ipcMain.on('getSaveKey', (event) => {
 ipcMain.handle('steamworks:isAppActivated', async () => steamworksClient ? steamworksClient.apps.isSubscribed() : true);
 
 ipcMain.handle('log', async (event, args) => {
-	writeFileSync(resolve('./log.txt'), args.join(' ') + EOL, { encoding: 'utf-8', flag: 'a' });
+	// 固定落点在 resources 下（原先 ./log.txt 随启动工作目录漂移，Steam 启动时位置不确定）；目录只读等写失败不抛回渲染层
+	try { writeFileSync(path.join(process.resourcesPath, 'log.txt'), args.join(' ') + EOL, { encoding: 'utf-8', flag: 'a' }); } catch (e) {}
 });

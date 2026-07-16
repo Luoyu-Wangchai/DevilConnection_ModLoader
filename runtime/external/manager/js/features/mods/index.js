@@ -1,6 +1,7 @@
 import { desktopApi } from '../../core/api.js';
-import { normResponse, sizeMB } from '../../core/utils.js';
+import { normResponse, sizeMB, pickFiles } from '../../core/utils.js';
 import { createConfigModal } from '../../ui/configModal.js';
+import { showDownloadProgress, updateDownloadProgress, hideDownloadProgress } from '../../ui/downloadProgress.js';
 import {
 	renderAsarInstalledCard,
 	renderAsarMissingCard,
@@ -32,7 +33,7 @@ export function createModsManager({ askConfirm }) {
 
 	// 点「更新」：先自动检测，再按结果决定是否下载更新
 	async function handleModUpdate(idx, mod, onRefresh) {
-		const chk = normResponse(await desktopApi.checkModUpdate(idx));
+		const chk = normResponse(await desktopApi.checkModUpdate(idx, mod.name));
 		if (!chk.ok) { await askConfirm({ title: '检测失败', message: chk.message || '无法检测更新' }); return; }
 		const d = chk.data || {};
 		if (d.status === 'current') { await askConfirm({ title: '已是最新版本', message: `「${mod.displayName || mod.name}」已是最新版本。` }); return; }
@@ -40,7 +41,17 @@ export function createModsManager({ askConfirm }) {
 		if (d.status !== 'outdated') { await askConfirm({ title: '暂无法更新', message: '未能确定远端版本，无法更新。' }); return; }
 		const go = await askConfirm({ title: '发现模组更新', message: `「${mod.displayName || mod.name}」有新版本 ${d.remoteDisplay || ''}，是否下载并更新？` });
 		if (!go) return;
-		const res = normResponse(await desktopApi.updateMod(idx));
+		showDownloadProgress(mod.displayName || mod.name);
+		const unsub = desktopApi.onUpdateModProgress(p => updateDownloadProgress(p));
+		let res;
+		try {
+			res = normResponse(await desktopApi.updateMod(idx, mod.name));
+		} catch (e) {
+			res = { ok: false, message: (e && e.message) || '更新失败' };
+		} finally {
+			if (unsub) unsub();
+			hideDownloadProgress();
+		}
 		if (res.ok) { await askConfirm({ title: '更新完成', message: '模组已更新，下次启动游戏生效。' }); onRefresh(); }
 		else await askConfirm({ title: '更新失败', message: res.message || '未知错误' });
 	}
@@ -52,13 +63,13 @@ export function createModsManager({ askConfirm }) {
 
 		const configBtn = item.querySelector('[data-a="config"]');
 		if (configBtn) configBtn.onclick = async () => {
-			try { await openConfigModal(idx, mod.displayName || mod.name); }
+			try { await openConfigModal(idx, mod.displayName || mod.name, mod.name); }
 			catch (e) { await askConfirm({ title: '配置不可用', message: String(e && e.message || e) }); }
 		};
 
 		item.querySelector('[data-a="toggle"]').onclick = async () => {
 			if (gameRunning) { await askConfirm({ title: '游戏运行中', message: '启用/禁用模组需要先完全关闭游戏。' }); return; }
-			const r = normResponse(await desktopApi.toggleModDisabled(idx));
+			const r = normResponse(await desktopApi.toggleModDisabled(idx, mod.name));
 			if (!r.ok) await askConfirm({ title: '操作失败', message: r.message || '未知错误' });
 			onRefresh();
 		};
@@ -69,7 +80,7 @@ export function createModsManager({ askConfirm }) {
 				message: `确定要删除 "${mod.displayName || mod.name}" 吗？`
 			});
 			if (ok) {
-				const r = normResponse(await desktopApi.deleteMod(idx));
+				const r = normResponse(await desktopApi.deleteMod(idx, mod.name));
 				if (!r.ok) await askConfirm({ title: '删除失败', message: r.message || '未知错误' });
 				onRefresh();
 			}
@@ -89,7 +100,7 @@ export function createModsManager({ askConfirm }) {
 			if (cached) {
 				if (statusEl) applyModStatus(statusEl, cached);
 			} else {
-				desktopApi.checkModUpdate(idx)
+				desktopApi.checkModUpdate(idx, mod.name)
 					.then(res => {
 						const r = normResponse(res);
 						const d = r.ok ? (r.data || {}) : { status: 'error' };
@@ -147,7 +158,8 @@ export function createModsManager({ askConfirm }) {
 			swapThreshold: 0.65,
 			onEnd: async (evt) => {
 				if (evt.oldIndex === evt.newIndex) return;
-				await desktopApi.moveModTo(evt.oldIndex, evt.newIndex);
+				const r = normResponse(await desktopApi.moveModTo(evt.oldIndex, evt.newIndex));
+				if (!r.ok) await askConfirm({ title: '排序失败', message: r.message || '未知错误' });
 				refreshMods();
 			}
 		});
@@ -201,15 +213,7 @@ export function createModsManager({ askConfirm }) {
 
 	function bindImportButton() {
 		document.getElementById('btn-import-mod').onclick = () => {
-			const input = document.createElement('input');
-			input.type = 'file';
-			input.accept = '.asar,.zip,.rar';
-			input.multiple = true;
-			input.onchange = async () => {
-				const files = [...input.files];
-				if (files.length) await importModFiles(files);
-			};
-			input.click();
+			pickFiles({ accept: '.asar,.zip,.rar', multiple: true, onSelected: (files) => importModFiles(files) });
 		};
 
 		const openBtn = document.getElementById('btn-open-mods-folder');

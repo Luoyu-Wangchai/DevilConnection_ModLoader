@@ -1,5 +1,5 @@
 import { desktopApi } from '../core/api.js';
-import { normResponse } from '../core/utils.js';
+import { normResponse, escapeHtml } from '../core/utils.js';
 
 const FIELD_INPUT_CLS =
 	'w-full bg-slate-50 border border-transparent rounded-xl px-4 py-2.5 text-sm ' +
@@ -18,7 +18,7 @@ function buildField(field, value) {
 	const wrap = el('<div class="space-y-1.5"></div>');
 	const labelRow = el(
 		`<div class="flex items-center gap-1.5">
-			<label class="text-xs font-bold text-slate-600">${field.label || field.key}</label>
+			<label class="text-xs font-bold text-slate-600">${escapeHtml(field.label || field.key)}</label>
 			${field.required ? '<span class="text-rose-400 text-xs leading-none">*</span>' : ''}
 		</div>`
 	);
@@ -74,10 +74,14 @@ function buildField(field, value) {
 		input.value = value == null ? '' : String(value);
 		input.placeholder = field.placeholder || '';
 		wrap.appendChild(input);
-		getVal = () => field.type === 'number' ? Number(input.value) : input.value;
+		// number 留空返回 ''（而非 Number('')===0），否则必填校验 String(0).trim() 恒通过、必填数字可被留空保存
+		getVal = () => {
+			if (field.type !== 'number') return input.value;
+			return input.value.trim() === '' ? '' : Number(input.value);
+		};
 	}
 
-	const help = el(`<p class="text-[10px] leading-relaxed text-slate-400">${field.help || ''}</p>`);
+	const help = el(`<p class="text-[10px] leading-relaxed text-slate-400">${escapeHtml(field.help || '')}</p>`);
 	if (field.help) wrap.appendChild(help);
 	const invalidMsg = el('<p class="hidden text-[10px] font-bold text-rose-500">此项必填</p>');
 	wrap.appendChild(invalidMsg);
@@ -98,8 +102,8 @@ function buildField(field, value) {
 }
 
 export function createConfigModal() {
-	async function openConfigModal(idx, modDisplayName) {
-		const res = normResponse(await desktopApi.getModConfig(idx));
+	async function openConfigModal(idx, modDisplayName, expectName) {
+		const res = normResponse(await desktopApi.getModConfig(idx, expectName));
 		if (!res.ok) throw new Error(res.message || '读取配置失败');
 		const { schema, values } = res.data;
 
@@ -114,8 +118,8 @@ export function createConfigModal() {
 							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
 						</div>
 						<div class="min-w-0 flex-1">
-							<h3 class="font-bold text-slate-800 truncate">${schema.title || modDisplayName || '模组'} · 配置</h3>
-							${schema.description ? `<p class="text-[11px] text-slate-400 mt-1 leading-relaxed">${schema.description}</p>` : ''}
+							<h3 class="font-bold text-slate-800 truncate">${escapeHtml(schema.title || modDisplayName || '模组')} · 配置</h3>
+							${schema.description ? `<p class="text-[11px] text-slate-400 mt-1 leading-relaxed">${escapeHtml(schema.description)}</p>` : ''}
 						</div>
 					</div>
 					<div data-r="fields" class="px-6 py-1 space-y-4 overflow-y-auto flex-1"></div>
@@ -171,7 +175,7 @@ export function createConfigModal() {
 				const out = {};
 				for (const c of controls) out[c.field.key] = c.get();
 				saveBtn.disabled = true;
-				const r = normResponse(await desktopApi.saveModConfig(idx, out));
+				const r = normResponse(await desktopApi.saveModConfig(idx, expectName, out));
 				if (!r.ok) {
 					saveBtn.disabled = false;
 					saveBtn.textContent = '保存失败';

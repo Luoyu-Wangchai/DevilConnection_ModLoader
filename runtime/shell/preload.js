@@ -3,7 +3,7 @@ const path = require('path');
 let ML = null;
 try {
 	ML = require(path.join(process.resourcesPath, 'ModLoader.js'));
-} catch (e) {  }
+} catch (e) { console.error('[ModLoader preload] 加载 ModLoader.js 失败，模组与汉化将不会注入', e); }
 
 const { contextBridge, ipcRenderer } = require('electron');
 const fs = require('fs');
@@ -96,5 +96,5 @@ try {
 	if (ML && typeof ML.getScripts === 'function') {
 		for (const s of ML.getScripts()) webFrame.executeJavaScript(s.code);
 	}
-} catch (e) {  }
+} catch (e) { try { console.error('[ModLoader preload] 注入模组 hook 失败', e); } catch (_) {} }
 

@@ -1,5 +1,4 @@
 import { normResponse } from '../core/utils.js';
-import { desktopApi } from './api.js';
 
 export function createTaskRunner({ askConfirm }) {
 	let busy = false;
@@ -9,7 +8,6 @@ export function createTaskRunner({ askConfirm }) {
 	const taskTitle = document.getElementById('task-progress-title');
 	const taskPercent = document.getElementById('task-progress-percent');
 	const TASK_HIDE_DELAY = 1000;
-	let activeTaskId = '';
 
 	const setTaskProgress = (p, msg) => {
 		const percent = Math.max(0, Math.min(100, Math.round(Number(p) || 0)));
@@ -18,38 +16,31 @@ export function createTaskRunner({ askConfirm }) {
 		taskText.textContent = msg || '';
 	};
 
-	const startTaskUI = (name, taskId) => {
+	const startTaskUI = (name) => {
 		busy = true;
-		activeTaskId = taskId;
 		taskWrap.classList.remove('hidden');
 		taskTitle.textContent = name;
 		setTaskProgress(0, '请稍候...');
 	};
 
 	const finishTaskUI = () => {
-		activeTaskId = '';
 		setTimeout(() => {
 			taskWrap.classList.add('hidden');
 			busy = false;
 		}, TASK_HIDE_DELAY);
 	};
 
-	const unsubscribeTaskProgress = desktopApi.onTaskProgress(payload => {
-		if (!payload || payload.taskId !== activeTaskId) return;
-		setTaskProgress(payload.percent, payload.text || '处理中...');
-	});
-
+	// 进度由 action 内部用 setProgress 本地驱动（主进程侧无逐步进度事件）
 	async function runTask(name, action) {
 		if (busy) return {
 			ok: false,
 			kind: 'info',
 			message: '已有任务在执行中'
 		};
-		const taskId = Math.random().toString(36).slice(2, 9);
-		startTaskUI(name, taskId);
+		startTaskUI(name);
 		let res;
 		try {
-			res = await action({ setProgress: setTaskProgress, taskId });
+			res = await action({ setProgress: setTaskProgress });
 			if (!res || typeof res !== 'object' || !('ok' in res)) {
 				res = normResponse(res);
 			}
@@ -73,9 +64,7 @@ export function createTaskRunner({ askConfirm }) {
 		return res;
 	}
 
-	function dispose() {
-		unsubscribeTaskProgress && unsubscribeTaskProgress();
-	}
+	function dispose() {}
 
 	function isBusy() {
 		return busy;

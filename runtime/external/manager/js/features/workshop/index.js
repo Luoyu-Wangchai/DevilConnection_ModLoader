@@ -1,5 +1,6 @@
 import { normResponse } from '../../core/utils.js';
 import { desktopApi } from '../../core/api.js';
+import { showDownloadProgress, updateDownloadProgress, hideDownloadProgress } from '../../ui/downloadProgress.js';
 import {
 	renderWorkshopLoading,
 	renderWorkshopError,
@@ -18,50 +19,6 @@ export function createWorkshopManager({ askConfirm }) {
 
 	const listEl = () => document.getElementById('workshop-list');
 
-	// ---- 下载进度卡片（上方动态显示）----
-	function progressEls() {
-		return {
-			wrap: document.getElementById('workshop-progress'),
-			text: document.getElementById('workshop-progress-text'),
-			pct: document.getElementById('workshop-progress-pct'),
-			bar: document.getElementById('workshop-progress-bar')
-		};
-	}
-	function showProgress(modName) {
-		const p = progressEls();
-		if (!p.wrap) return;
-		p.text.textContent = `正在准备下载「${modName}」...`;
-		p.pct.textContent = '';
-		p.bar.style.width = '0%';
-		p.wrap.classList.remove('hidden');
-	}
-	function updateProgress(modName, payload) {
-		const p = progressEls();
-		if (!p.wrap || !payload) return;
-		if (payload.phase === 'meta') {
-			p.text.textContent = `正在获取「${modName}」版本信息...`;
-		} else if (payload.phase === 'download') {
-			const mb = payload.received ? (payload.received / 1024 / 1024).toFixed(2) : '0';
-			const totalMb = payload.total ? (payload.total / 1024 / 1024).toFixed(2) : null;
-			p.text.textContent = `正在下载「${modName}」${payload.tag ? ' ' + payload.tag : ''}`;
-			if (payload.pct != null) {
-				p.bar.style.width = payload.pct + '%';
-				p.pct.textContent = totalMb ? `${payload.pct}% · ${mb} / ${totalMb} MB` : payload.pct + '%';
-			} else {
-				p.pct.textContent = mb + ' MB';
-			}
-		} else if (payload.phase === 'install') {
-			p.text.textContent = `正在安装「${modName}」...`;
-			p.bar.style.width = '99%';
-		} else if (payload.phase === 'done') {
-			p.bar.style.width = '100%';
-		}
-	}
-	function hideProgress() {
-		const p = progressEls();
-		if (p.wrap) setTimeout(() => p.wrap.classList.add('hidden'), 400);
-	}
-
 	async function doInstall(mod, tag) {
 		if (busy) return;
 		if (gameRunning) {
@@ -76,12 +33,19 @@ export function createWorkshopManager({ askConfirm }) {
 		const go = await askConfirm({ title: tag ? '安装历史版本' : (mod.installed ? '更新模组' : '下载模组'), message: action });
 		if (!go) return;
 		busy = true;
-		showProgress(mod.name);
-		const unsub = desktopApi.onStoreProgress((payload) => updateProgress(mod.name, payload));
-		const res = normResponse(await desktopApi.storeInstall(mod.repo, tag || undefined));
-		if (unsub) unsub();
-		hideProgress();
-		busy = false;
+		showDownloadProgress(mod.name);
+		const unsub = desktopApi.onStoreProgress((payload) => updateDownloadProgress(payload));
+		let res;
+		try {
+			res = normResponse(await desktopApi.storeInstall(mod.repo, tag || undefined));
+		} catch (e) {
+			res = { ok: false, message: (e && e.message) || '安装失败' };
+		} finally {
+			// 无论成功/异常都要复位，否则 busy 永久为 true、进度条不消失、后续安装全被吞
+			if (unsub) unsub();
+			hideDownloadProgress();
+			busy = false;
+		}
 		if (res.ok) {
 			await askConfirm({ title: '完成', message: `「${mod.name}」已安装${tag ? `（${tag}）` : ''}，下次启动游戏生效。` });
 			await refreshWorkshop(true);

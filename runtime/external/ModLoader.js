@@ -21,13 +21,6 @@ const MAX_PATH_CACHE = 2000;
 const MAX_CONFIG_CACHE = 100;
 const BRAND_BASE = ' - DevilConnection_Modloader_Rebuild';
 
-const BLACKLIST = new Set([
-	'modloader.js', 'manager.js', 'package.json', 'main.js',
-	'preload.js', 'preload_manager.js', 'steam.js', 'node_modules',
-	'manager', 'private.pem', 'public.pem', '.env', '.env.example',
-	'config', 'version.json', '.update'
-]);
-
 let ModCore = null;
 try { ModCore = require('./ModCore.js'); } catch (e) {}
 
@@ -152,7 +145,7 @@ const Env = {
 	getResourcesPath() {
 		try {
 			if (process.resourcesPath) return path.normalize(process.resourcesPath);
-			const _app = electron.app || (electron.remote && electron.remote.app);
+			const _app = electron.app;
 			let p = _app ? _app.getAppPath() : process.cwd();
 			p = p.replace(/\\/g, '/');
 			if (process.platform === 'win32' && p.toLowerCase().includes('/resources/')) {
@@ -165,7 +158,7 @@ const Env = {
 	},
 	getUserDataPath() {
 		try {
-			const app = electron.app || (electron.remote && electron.remote.app);
+			const app = electron.app;
 			if (app) return app.getPath('userData');
 			return path.join(this.getResourcesPath(), '..', '.mod_cache');
 		} catch (e) {
@@ -217,8 +210,7 @@ const PluginManager = {
 			const disk = O.readdirSync(this.pluginDir).filter(name => {
 				if (name.startsWith('.')) return false;
 				if (name.toLowerCase() === TARGET_ASAR_BODY) return false;
-				if (BLACKLIST.has(name.toLowerCase())) return false;
-				if (name === 'mods.config.json') return false;
+				// 只加载 plugins/ 下的 *.asar 模组文件；.disable 后缀=禁用、mods.config.json、config 目录等均不以 .asar 结尾故天然排除
 				if (!name.toLowerCase().endsWith(ASAR_EXT)) return false;
 				try {
 					return ofs.statSync(path.join(this.pluginDir, name)).isFile();
@@ -236,7 +228,7 @@ const PluginManager = {
 			this.skipped = [];
 			if (ModCore) {
 				try {
-					const bare = (n) => n.replace(/^\d+_/, '').replace(/\.asar$/i, '');
+					const bare = (n) => ModCore.bareName(n);
 					const readMeta = (dir, canon) => {
 						const raw = ModCore.readAsarInner(ofs, path.join(dir, canon), 'mods.json');
 						if (!raw) return {};
@@ -342,7 +334,7 @@ const PluginManager = {
 		if (dirty || hadLegacy) {
 			cfg.order = (cfg.order || []).filter(n =>
 				ofs.existsSync(path.join(this.pluginDir, n)) || ofs.existsSync(path.join(this.pluginDir, n + '.disable')));
-			try { O.writeFileSync(this.configPath(), JSON.stringify({ order: cfg.order }, null, 2), 'utf8'); Logger.info('mods.config.json 已精简为只含 order'); } catch (e) {}
+			try { O.writeFileSync(this.configPath(), JSON.stringify({ order: cfg.order }, null, 2), 'utf8'); Logger.info('mods.config.json 已精简为只含 order'); } catch (e) { Logger.error('精简写回 mods.config.json 失败', e); }
 		}
 		return cfg;
 	},
@@ -503,20 +495,22 @@ const ScriptInjection = {
 			try {
 				const code = O.readFileSync(PluginManager.getDecodedCachePath(hookPath), 'utf8');
 				const name = path.basename(plugin);
+				// 仅用于注入代码里的日志字面量：文件名在 Windows 下可含单引号/反斜杠，直接内插会破坏生成的 JS 字符串
+				const logName = name.replace(/[\\'"]/g, '_');
 				this.scripts.push({
 					name,
 					code: `(function(){
-console.log('[ModLoader] 插件 Hook: ${name}');
+console.log('[ModLoader] 插件 Hook: ${logName}');
 function __dcmlRun(){${code}\n}
 try { __dcmlRun(); }
 catch (e) {
 	if (document.readyState === 'loading') {
-		console.warn('[ModLoader] 插件 ${name} 页面就绪前执行失败, DOMContentLoaded 后重试', e);
+		console.warn('[ModLoader] 插件 ${logName} 页面就绪前执行失败, DOMContentLoaded 后重试', e);
 		document.addEventListener('DOMContentLoaded', function () {
-			try { __dcmlRun(); } catch (e2) { console.error('[ModLoader] 插件 ${name} 运行错误', e2); }
+			try { __dcmlRun(); } catch (e2) { console.error('[ModLoader] 插件 ${logName} 运行错误', e2); }
 		});
 	} else {
-		console.error('[ModLoader] 插件 ${name} 运行错误', e);
+		console.error('[ModLoader] 插件 ${logName} 运行错误', e);
 	}
 }
 })();`
@@ -524,21 +518,6 @@ catch (e) {
 				Logger.debug(`插件 Hook 就绪: ${name}`);
 			} catch (e) { Logger.error(`读取 ${hookPath} 失败`, e); }
 		});
-	},
-
-	injectInto(win) {
-		if (this.scripts.length === 0) return;
-		const doInject = () => this.scripts.forEach(s =>
-			win.webContents.executeJavaScript(s.code)
-				.then(() => Logger.debug(`成功向窗口注入: ${s.name}`))
-				.catch(e => Logger.error(`注入脚本 ${s.name} 失败`, e)));
-		if (!win.webContents.isLoading()) doInject();
-		win.webContents.on('did-finish-load', doInject);
-	},
-
-	injectAllExisting() {
-		const wins = electron.BrowserWindow.getAllWindows();
-		if (wins.length) { Logger.debug(`发现 ${wins.length} 个现有窗口, 注入中...`); wins.forEach(w => this.injectInto(w)); }
 	}
 };
 
@@ -581,7 +560,8 @@ const Hooks = {
 		const map = (p) => {
 			if (typeof p !== 'string') return p;
 			try {
-				if (p.toLowerCase().includes('.asar') || p.includes('/Resources/') || p.includes('\\resources\\') || !path.isAbsolute(p)) {
+				// resolvePath 只对 .asar 内相对路径或非绝对路径产出映射；原先的 /Resources/ 判断永远走不到映射，是死条件
+				if (p.toLowerCase().includes('.asar') || !path.isAbsolute(p)) {
 					return PluginManager.resolvePath(p) || p;
 				}
 			} catch (e) {}
@@ -650,16 +630,6 @@ const Hooks = {
 			});
 		};
 		if (app.isReady()) register(); else app.whenReady().then(register);
-	},
-
-	applyWindow() {
-		if (!Env.isMain) return;
-		const { app } = electron;
-		const setup = () => {
-			app.on('browser-window-created', (_e, win) => ScriptInjection.injectInto(win));
-			ScriptInjection.injectAllExisting();
-		};
-		if (app.isReady()) setup(); else app.whenReady().then(setup);
 	}
 };
 
@@ -689,7 +659,6 @@ if (!Env.isMain) { installHooks(); loadPlugins(); }
 module.exports = {
 	installHooks,
 	loadPlugins,
-	injectInto: (win) => ScriptInjection.injectInto(win),
 	getScripts: () => ScriptInjection.scripts,
 	PluginManager,
 	Logger,

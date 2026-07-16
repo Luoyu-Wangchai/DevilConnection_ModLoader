@@ -1,7 +1,4 @@
 export const desktopApi = {
-	onTaskProgress(callback) {
-		return window.desktopUI.onTaskProgress(callback);
-	},
 	launchGame() {
 		return window.desktopUI.launchGame();
 	},
@@ -9,14 +6,14 @@ export const desktopApi = {
 	getModsData() {
 		return window.desktopUI.getModsData();
 	},
-	toggleModDisabled(idx) {
-		return window.desktopUI.toggleModDisabled(idx);
+	toggleModDisabled(idx, expectName) {
+		return window.desktopUI.toggleModDisabled(idx, expectName);
 	},
 	isGameRunning() {
 		return window.desktopUI.isGameRunning();
 	},
-	deleteMod(idx) {
-		return window.desktopUI.deleteMod(idx);
+	deleteMod(idx, expectName) {
+		return window.desktopUI.deleteMod(idx, expectName);
 	},
 	moveModTo(oldIndex, newIndex) {
 		return window.desktopUI.moveModTo(oldIndex, newIndex);
@@ -33,11 +30,14 @@ export const desktopApi = {
 	cancelPendingImport(token) {
 		return window.desktopUI.cancelPendingImport(token);
 	},
-	checkModUpdate(idx) {
-		return window.desktopUI.checkModUpdate(idx);
+	checkModUpdate(idx, expectName) {
+		return window.desktopUI.checkModUpdate(idx, expectName);
 	},
-	updateMod(idx) {
-		return window.desktopUI.updateMod(idx);
+	updateMod(idx, expectName) {
+		return window.desktopUI.updateMod(idx, expectName);
+	},
+	onUpdateModProgress(callback) {
+		return window.desktopUI.onUpdateModProgress(callback);
 	},
 	getStoreList() {
 		return window.desktopUI.getStoreList();
@@ -51,11 +51,11 @@ export const desktopApi = {
 	onStoreProgress(callback) {
 		return window.desktopUI.onStoreProgress(callback);
 	},
-	getModConfig(idx) {
-		return window.desktopUI.getModConfig(idx);
+	getModConfig(idx, expectName) {
+		return window.desktopUI.getModConfig(idx, expectName);
 	},
-	saveModConfig(idx, values) {
-		return window.desktopUI.saveModConfig(idx, values);
+	saveModConfig(idx, expectName, values) {
+		return window.desktopUI.saveModConfig(idx, expectName, values);
 	},
 	openModsFolder() {
 		return window.desktopUI.openModsFolder();
@@ -88,8 +88,8 @@ export const desktopApi = {
 	getBackupsData() {
 		return window.desktopUI.getBackupsData();
 	},
-	restoreBackup(name, taskId) {
-		return window.desktopUI.restoreBackup(name, taskId);
+	restoreBackup(name) {
+		return window.desktopUI.restoreBackup(name);
 	},
 	renameBackup(name, nextLabel) {
 		return window.desktopUI.renameBackup(name, nextLabel);
@@ -97,19 +97,19 @@ export const desktopApi = {
 	toggleBackupLock(name) {
 		return window.desktopUI.toggleBackupLock(name);
 	},
-	exportBackupFile(name, taskId) {
-		return window.desktopUI.exportBackupFile(name, taskId);
+	exportBackupFile(name) {
+		return window.desktopUI.exportBackupFile(name);
 	},
 	deleteBackup(name) {
 		return window.desktopUI.deleteBackup(name);
 	},
-	backupNow(taskId, finalName) {
-		return window.desktopUI.backupNow(taskId, finalName);
+	backupNow(finalName) {
+		return window.desktopUI.backupNow(finalName);
 	},
-	importBackupFromBuffer(fileName, bytes, taskId) {
-		return window.desktopUI.importBackupFromBuffer(fileName, bytes, taskId);
+	importBackupFromBuffer(fileName, bytes) {
+		return window.desktopUI.importBackupFromBuffer(fileName, bytes);
 	},
-	exportCurrentSave(taskId) {
-		return window.desktopUI.exportCurrentSave(taskId);
+	exportCurrentSave() {
+		return window.desktopUI.exportCurrentSave();
 	}
 };

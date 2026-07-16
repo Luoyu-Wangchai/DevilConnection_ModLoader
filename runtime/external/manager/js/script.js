@@ -22,6 +22,12 @@ const navigation = createNavigation({
 
 window.switchPage = navigation.switchPage;
 
+// 控制台首页两张快捷卡片：原先用内联 onclick，CSP 收紧（禁内联脚本）后改为脚本绑定
+const cardGotoMods = document.getElementById('card-goto-mods');
+if (cardGotoMods) cardGotoMods.onclick = () => navigation.switchPage('mods');
+const cardGotoBackups = document.getElementById('card-goto-backups');
+if (cardGotoBackups) cardGotoBackups.onclick = () => navigation.switchPage('backups');
+
 modsManager.bindImportButton();
 modsManager.bindDropImport();
 backupsManager.bindEvents();
@@ -38,14 +44,15 @@ if (rebuildRepoLink) {
 }
 
 // 本 Fork 版本信息（版本号/仓库单一真源 = version.json，经 Manager.js 读出后注入 UI）
-let appInfo = { displayVersion: 'RV1.2.7', repoUrl: 'https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader' };
+// 版本号不在此硬编码，避免与真源漂移；仅保留仓库地址兜底
+let appInfo = { displayVersion: '', repoUrl: 'https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader' };
 async function initAppInfo() {
 	try {
 		const res = normResponse(await desktopApi.getAppInfo());
 		if (res.ok && res.data) appInfo = { ...appInfo, ...res.data };
 	} catch (e) {}
 	const titleEl = document.getElementById('app-title');
-	if (titleEl) titleEl.textContent = `恶魔连结模组管理器 ${appInfo.displayVersion}`;
+	if (titleEl) titleEl.textContent = appInfo.displayVersion ? `恶魔连结模组管理器 ${appInfo.displayVersion}` : '恶魔连结模组管理器';
 	// 所有「Fork rebuild」字样 → 跳本 Fork 仓库
 	document.querySelectorAll('.js-fork-link').forEach(a => {
 		a.onclick = (e) => { e.preventDefault(); desktopApi.openExternal(appInfo.repoUrl); };
@@ -165,9 +172,16 @@ async function runUpdateCheck(interactive) {
 	updateChecking = true;
 	setCheckLabel('检测版本更新中...');
 	if (cuIcon) cuIcon.classList.add('animate-spin');
-	const res = normResponse(await desktopApi.checkForUpdate(loaderSettings.beta_updates));
-	if (cuIcon) cuIcon.classList.remove('animate-spin');
-	updateChecking = false;
+	let res;
+	try {
+		res = normResponse(await desktopApi.checkForUpdate(loaderSettings.beta_updates));
+	} catch (e) {
+		res = { ok: false, message: (e && e.message) || '检查更新失败' };
+	} finally {
+		// 无论成功/异常都要复位，否则 updateChecking 永久为 true、图标永转、后续点击全被吞
+		if (cuIcon) cuIcon.classList.remove('animate-spin');
+		updateChecking = false;
+	}
 	if (!res.ok) {
 		setCheckLabel('检查更新');
 		if (interactive) await askConfirm({ title: '检查更新失败', message: res.message || '无法连接 GitHub，请检查网络后重试。' });
@@ -214,13 +228,21 @@ document.getElementById('btn-start').onclick = async () => {
 	const btn = document.getElementById('btn-start');
 	btn.disabled = true;
 	btn.textContent = ' 正在启动... ';
-	const res = normResponse(await desktopApi.launchGame());
+	let res;
+	try {
+		res = normResponse(await desktopApi.launchGame());
+	} catch (e) {
+		res = { ok: false, message: (e && e.message) || '无法启动游戏' };
+	}
 	if (!res.ok) {
 		btn.disabled = false;
 		btn.textContent = ' 启动游戏 ';
 		await askConfirm({ title: '启动失败', message: res.message || '无法启动游戏' });
 	}
 };
+
+// 兜底：任何漏接的 Promise 异常至少留下日志，不静默吞掉
+window.addEventListener('unhandledrejection', (e) => { console.error('[管理器] 未处理的 Promise 异常', e && e.reason); });
 
 window.addEventListener('beforeunload', () => { dispose(); });
 

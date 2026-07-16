@@ -3,24 +3,25 @@ const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (ch, ...args) => ipcRenderer.invoke(ch, ...args);
 
 contextBridge.exposeInMainWorld('desktopUI', {
-	onTaskProgress(callback) {
-		const listener = (_e, payload) => callback(payload);
-		ipcRenderer.on('mgr:taskProgress', listener);
-		return () => ipcRenderer.removeListener('mgr:taskProgress', listener);
-	},
 	launchGame: () => invoke('app:launchGame'),
 
 	getModsData: () => invoke('mgr:getModsData'),
 	isGameRunning: () => invoke('mgr:isGameRunning'),
-	toggleModDisabled: (idx) => invoke('mgr:toggleModDisabled', idx),
-	deleteMod: (idx) => invoke('mgr:deleteMod', idx),
+	// 模组操作带 expectName（磁盘规范名）做 idx 身份复核，防列表过期时错位操作到别的模组
+	toggleModDisabled: (idx, expectName) => invoke('mgr:toggleModDisabled', idx, expectName),
+	deleteMod: (idx, expectName) => invoke('mgr:deleteMod', idx, expectName),
 	moveModTo: (oldIndex, newIndex) => invoke('mgr:moveModTo', oldIndex, newIndex),
 	autoFixOrder: () => invoke('mgr:autoFixOrder'),
 	importModFromBuffer: (fileName, bytes) => invoke('mgr:importModFromBuffer', fileName, bytes),
 	confirmPendingImport: (token) => invoke('mgr:confirmPendingImport', token),
 	cancelPendingImport: (token) => invoke('mgr:cancelPendingImport', token),
-	checkModUpdate: (idx) => invoke('mgr:checkModUpdate', idx),
-	updateMod: (idx) => invoke('mgr:updateMod', idx),
+	checkModUpdate: (idx, expectName) => invoke('mgr:checkModUpdate', idx, expectName),
+	updateMod: (idx, expectName) => invoke('mgr:updateMod', idx, expectName),
+	onUpdateModProgress(callback) {
+		const listener = (_e, payload) => callback(payload);
+		ipcRenderer.on('mgr:updateModProgress', listener);
+		return () => ipcRenderer.removeListener('mgr:updateModProgress', listener);
+	},
 	getStoreList: () => invoke('mgr:getStoreList'),
 	storeInstall: (repo, tag) => invoke('mgr:storeInstall', repo, tag),
 	storeHistory: (repo) => invoke('mgr:storeHistory', repo),
@@ -29,8 +30,8 @@ contextBridge.exposeInMainWorld('desktopUI', {
 		ipcRenderer.on('mgr:storeProgress', listener);
 		return () => ipcRenderer.removeListener('mgr:storeProgress', listener);
 	},
-	getModConfig: (idx) => invoke('mgr:getModConfig', idx),
-	saveModConfig: (idx, values) => invoke('mgr:saveModConfig', idx, values),
+	getModConfig: (idx, expectName) => invoke('mgr:getModConfig', idx, expectName),
+	saveModConfig: (idx, expectName, values) => invoke('mgr:saveModConfig', idx, expectName, values),
 	openModsFolder: () => invoke('mgr:openModsFolder'),
 	openExternal: (url) => invoke('mgr:openExternal', url),
 	getAppInfo: () => invoke('mgr:getAppInfo'),
@@ -46,13 +47,12 @@ contextBridge.exposeInMainWorld('desktopUI', {
 
 	autoBackup: (settings) => invoke('mgr:autoBackup', settings),
 	getBackupsData: () => invoke('mgr:getBackupsData'),
-	restoreBackup: (name, taskId) => invoke('mgr:restoreBackup', name, taskId),
+	restoreBackup: (name) => invoke('mgr:restoreBackup', name),
 	renameBackup: (name, nextLabel) => invoke('mgr:renameBackup', name, nextLabel),
 	toggleBackupLock: (name) => invoke('mgr:toggleBackupLock', name),
-	exportBackupFile: (name, taskId) => invoke('mgr:exportBackupFile', name, taskId),
+	exportBackupFile: (name) => invoke('mgr:exportBackupFile', name),
 	deleteBackup: (name) => invoke('mgr:deleteBackup', name),
-	backupNow: (taskId, finalName) => invoke('mgr:backupNow', taskId, finalName),
-	importBackupFromBuffer: (fileName, bytes, taskId) =>
-		invoke('mgr:importBackupFromBuffer', fileName, bytes, taskId),
-	exportCurrentSave: (taskId) => invoke('mgr:exportCurrentSave', taskId)
+	backupNow: (finalName) => invoke('mgr:backupNow', finalName),
+	importBackupFromBuffer: (fileName, bytes) => invoke('mgr:importBackupFromBuffer', fileName, bytes),
+	exportCurrentSave: () => invoke('mgr:exportCurrentSave')
 });

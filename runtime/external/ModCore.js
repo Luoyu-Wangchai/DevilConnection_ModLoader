@@ -136,7 +136,7 @@ function metaForResolve(j) {
 // 版本串形态：[B]RV1.2.7 / 1.2.7.1 / 1.2.8-3CB3895E54
 //   数字段任意长度，第一位优先级最高，逐位比较，缺位补 0
 //   "-" 后为构建时间戳（YYMMDDHHmmss 的 hex），数字段全等时比时间戳，无后缀视为 0
-//   首字符 B（如 BRV1.2.8）= Beta 测试版；Beta 与否不参与大小比较，通道过滤在 pickUpdateTarget 做
+//   首字符 B（如 BRV1.2.8）= Beta 测试版；Beta 与否不参与大小比较，通道过滤在 Manager 的 resolveUpdateTarget 做
 function parseVerX(s) {
 	const str = String(s == null ? '' : s).trim();
 	const beta = /^b/i.test(str);
@@ -161,26 +161,11 @@ function cmpVerX(a, b) {
 	return 0;
 }
 
-// 更新通道选择。cur = { version, beta }（本地 version.json）；releases = [{ tag, ... }]；betaEnabled = 是否检测 Beta 通道
-// 返回 { hasUpdate, target, reason, poolSize }
-//   Beta 开：稳定+Beta 全池取最大，正常比较
-//   Beta 关 + 本地稳定：仅稳定池，正常比较
-//   Beta 关 + 本地 Beta：仅稳定池，忽略版本号直接更新到最新稳定版（reason='leaveBeta'）
-function pickUpdateTarget(cur, releases, betaEnabled) {
-	const parsed = [];
-	for (const r of (Array.isArray(releases) ? releases : [])) {
-		const p = parseVerX(r && r.tag);
-		if (p.nums) parsed.push({ rel: r, ver: p });
-	}
-	const pool = betaEnabled ? parsed : parsed.filter(x => !x.ver.beta);
-	if (!pool.length) return { hasUpdate: false, target: null, reason: null, poolSize: 0 };
-	let best = pool[0];
-	for (const x of pool) { if (cmpVerX(x.ver, best.ver) > 0) best = x; }
-	const curP = parseVerX(cur && cur.version);
-	const curBeta = !!(cur && cur.beta) || curP.beta;
-	if (!betaEnabled && curBeta) return { hasUpdate: true, target: best.rel, reason: 'leaveBeta', poolSize: pool.length };
-	const newer = !curP.nums || cmpVerX(curP, best.ver) < 0;
-	return { hasUpdate: newer, target: newer ? best.rel : null, reason: newer ? 'newer' : null, poolSize: pool.length };
+// 模组显示名/身份基名：统一去掉数字优先级前缀（NNN_）与 .asar / .asar.disable 后缀。
+// 加载器各处（列表显示名、config 绑定、依赖 id、工坊匹配、steamBypass 检测）都用它，
+// 避免同一逻辑的正则在多个文件各写一份、位数限制不一致而产生模组身份分歧。
+function bareName(name) {
+	return String(name == null ? '' : name).replace(/\.asar(\.disable)?$/i, '').replace(/^\d+_/, '');
 }
 
-module.exports = { resolveMods, suggestOrder, entries, readAsarInner, metaForResolve, parseVerX, cmpVerX, pickUpdateTarget };
+module.exports = { resolveMods, suggestOrder, entries, readAsarInner, metaForResolve, parseVerX, cmpVerX, bareName };

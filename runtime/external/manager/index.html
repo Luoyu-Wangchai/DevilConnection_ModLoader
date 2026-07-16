@@ -2,6 +2,9 @@
 <html lang="zh-CN">
 <head>
 	<meta charset="UTF-8">
+	<!-- 纵深防御：script-src 不含 'unsafe-inline'，注入的内联事件处理器（<img onerror> 等）一律被拦截；
+	     'unsafe-eval' 保留给浏览器版 Tailwind JIT；所有网络请求都在主进程完成，渲染层 connect-src 只需 'self' -->
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 	<title>恶魔连结 · 模组管理</title>
 	<script src="vendor/tailwind.browser.js"></script>
@@ -78,7 +81,7 @@
 	</aside>
 	<main class="flex-1 relative overflow-hidden flex flex-col w-full">
 		<section id="page-home" class="page-container active p-4 md:p-8">
-			<header class="mb-6 md:mb-10"><h2 id="app-title" class="text-2xl md:text-3xl font-bold text-slate-800">恶魔连结模组管理器 RV1.2.7</h2></header>
+			<header class="mb-6 md:mb-10"><h2 id="app-title" class="text-2xl md:text-3xl font-bold text-slate-800">恶魔连结模组管理器</h2></header>
 			<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
 				<div class="card sm:col-span-3 flex flex-col sm:flex-row items-center justify-between bg-gradient-to-br from-accent to-fuchsia-600 border-none gap-6">
 					<div class="text-white text-center sm:text-left">
@@ -87,13 +90,13 @@
 					</div>
 					<button id="btn-start" class="w-full sm:w-auto bg-white text-accent px-8 py-3 md:py-4 rounded-2xl font-bold text-base md:text-lg shadow-xl hover:scale-105 active:scale-95"> 启动游戏 </button>
 				</div>
-				<div class="card group hover:border-accent/30 cursor-pointer flex items-center md:block gap-4" onclick="switchPage('mods')">
+				<div id="card-goto-mods" class="card group hover:border-accent/30 cursor-pointer flex items-center md:block gap-4">
 					<div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-amber-50 text-amber-500 flex items-center justify-center md:mb-4 group-hover:scale-110 shrink-0">
 						<svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
 					</div>
 					<h4 class="font-bold text-base md:text-lg">管理模组</h4>
 				</div>
-				<div class="card group hover:border-accent/30 cursor-pointer flex items-center md:block gap-4" onclick="switchPage('backups')">
+				<div id="card-goto-backups" class="card group hover:border-accent/30 cursor-pointer flex items-center md:block gap-4">
 					<div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-emerald-50 text-emerald-500 flex items-center justify-center md:mb-4 group-hover:scale-110 shrink-0">
 						<svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
 					</div>
@@ -144,15 +147,6 @@
 				<div class="relative">
 					<svg class="w-4 h-4 text-slate-300 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
 					<input id="workshop-search" type="text" placeholder="搜索模组名称 / 简介 / 作者..." class="w-full bg-white border border-slate-200 rounded-2xl pl-11 pr-4 py-3 text-sm text-slate-700 placeholder-slate-300 focus:outline-none focus:border-accent/40 focus:ring-2 focus:ring-accent/10 shadow-glass">
-				</div>
-			</div>
-			<div id="workshop-progress" class="card mb-4 hidden">
-				<div class="flex items-center justify-between mb-2">
-					<span id="workshop-progress-text" class="text-sm font-bold text-slate-700">正在下载...</span>
-					<span id="workshop-progress-pct" class="text-xs text-slate-400 font-mono"></span>
-				</div>
-				<div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-					<div id="workshop-progress-bar" class="h-full bg-accent rounded-full" style="width:0%"></div>
 				</div>
 			</div>
 			<div class="card p-0 overflow-hidden">

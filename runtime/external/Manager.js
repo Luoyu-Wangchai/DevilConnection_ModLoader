@@ -39,6 +39,11 @@ function gameRoot() { return path.resolve(D.resourcesPath, '..'); }
 function storageDir() { return path.join(gameRoot(), '_storage'); }
 function backupsDir() { return path.join(gameRoot(), 'backups'); }
 function backupMetaPath() { return path.join(backupsDir(), '.meta.json'); }
+// 备份名来自渲染层：作为文件名分量前必须校验，禁止分隔符/盘符/.. 穿越出 backups 目录
+function validBackupName(name) {
+	const s = String(name == null ? '' : name);
+	return (s && !/[\\/:*?"<>|]/.test(s) && s !== '.' && s !== '..') ? s : null;
+}
 
 function ok(data) { return { ok: true, data: data === undefined ? null : data }; }
 function fail(message, reason) { return { ok: false, reason: reason || 'error', message: String(message || '未知错误') }; }
@@ -80,11 +85,10 @@ function writeModsConfig(cfg) {
 function sanitizeName(name) {
 	return String(name).replace(/[\\/:*?"<>|]/g, '').replace(/^\.+/, '').trim() || 'mod';
 }
+// 统一走 ModCore.bareName（去 NNN_ 前缀 + .asar/.disable 后缀），与 ModLoader/steamBypass 判定同一套正则，避免身份分歧
 function deriveDisplay(name) {
-	let s = name.replace(/\.asar$/i, '');
-	const m = s.match(/^(\d{1,4})_(.*)$/);
-	if (m) s = m[2];
-	return s || name;
+	if (ModCore && ModCore.bareName) return ModCore.bareName(name) || name;
+	return String(name).replace(/\.asar(\.disable)?$/i, '').replace(/^\d+_/, '') || name;
 }
 
 
@@ -211,10 +215,11 @@ function readModConfigValues(bareName) {
 	} catch (e) { return {}; }
 }
 
-function getModConfig(idx) {
+function getModConfig(idx, expectName) {
 	try {
 		const mod = effectiveMods()[idx];
 		if (!mod) return fail('模组不存在', 'notfound');
+		if (idMismatch(mod, expectName)) return fail('模组列表已变化，请刷新后重试', 'stale');
 		const schema = readModSchema(mod.diskName);
 		if (!schema) return fail('该模组没有提供配置声明', 'noschema');
 		const stored = readModConfigValues(mod.bareName);
@@ -228,10 +233,11 @@ function getModConfig(idx) {
 	} catch (e) { return fail(e.message); }
 }
 
-function saveModConfig(idx, values) {
+function saveModConfig(idx, expectName, values) {
 	try {
 		const mod = effectiveMods()[idx];
 		if (!mod) return fail('模组不存在', 'notfound');
+		if (idMismatch(mod, expectName)) return fail('模组列表已变化，请刷新后重试', 'stale');
 		if (!values || typeof values !== 'object') return fail('配置内容无效');
 		ensureDir(modConfigDir());
 		fs.writeFileSync(modConfigPath(mod.bareName), JSON.stringify(values, null, 2), 'utf8');
@@ -254,7 +260,7 @@ function insideModsForResolve() {
 				const raw = ModCore.readAsarInner(fs, path.join(dir, n), 'mods.json');
 				if (raw) meta = ModCore.metaForResolve(JSON.parse(raw.toString('utf8')));
 			} catch (e) {}
-			const bare = n.replace(/^\d+_/, '').replace(/\.asar$/i, '');
+			const bare = ModCore.bareName(n);
 			out.push({ id: meta.id || bare, canonical: 'insidemods/' + n, disabled: false, version: meta.version, deps: meta.deps });
 		}
 		out.sort((a, b) => a.canonical.localeCompare(b.canonical, undefined, { numeric: true, sensitivity: 'base' }));
@@ -323,11 +329,17 @@ function getModsData() {
 	} catch (e) { return fail(e.message); }
 }
 
-function toggleModDisabled(idx) {
+// idx 复核：前端列表可能因并发增删/拖拽/外部改动而过期，用 expectName（磁盘规范名）核对，防 idx 错位操作到别的模组
+function idMismatch(mod, expectName) {
+	return expectName && mod.name !== expectName;
+}
+
+function toggleModDisabled(idx, expectName) {
 	try {
 		const mods = effectiveMods();
 		const mod = mods[idx];
 		if (!mod) return fail('模组不存在', 'notfound');
+		if (idMismatch(mod, expectName)) return fail('模组列表已变化，请刷新后重试', 'stale');
 		if (isGameRunning()) return fail('游戏运行中无法启用/禁用模组，请先关闭游戏', 'busy');
 		const full = path.join(pluginsDir(), mod.diskName);
 		const target = mod.diskName.toLowerCase().endsWith(DISABLE_EXT)
@@ -342,11 +354,12 @@ function toggleModDisabled(idx) {
 	} catch (e) { return fail(e.message); }
 }
 
-function deleteMod(idx) {
+function deleteMod(idx, expectName) {
 	try {
 		const mods = effectiveMods();
 		const mod = mods[idx];
 		if (!mod) return fail('模组不存在', 'notfound');
+		if (idMismatch(mod, expectName)) return fail('模组列表已变化，请刷新后重试', 'stale');
 		if (isGameRunning()) return fail('游戏运行中无法删除模组，请先关闭游戏', 'busy');
 		const full = path.join(pluginsDir(), mod.diskName);
 		try {
@@ -396,7 +409,13 @@ function autoFixOrder() {
 
 const pendingImports = new Map();
 let importSeq = 0;
+// 冲突确认会话 10 分钟过期：用户放弃弹窗或管理页 reload 后 token 丢失，避免整份模组字节（CN 补丁级可达上百 MB）长期滞留内存
+const PENDING_IMPORT_TTL = 10 * 60 * 1000;
 function newImportToken() { return 'imp_' + (++importSeq) + '_' + Math.random().toString(36).slice(2, 8); }
+function prunePendingImports() {
+	const now = Date.now();
+	for (const [tok, p] of pendingImports) if (now - (p.at || 0) > PENDING_IMPORT_TTL) pendingImports.delete(tok);
+}
 
 function stageAsarImport(fileName, buf) {
 	const base = sanitizeName(path.basename(String(fileName || 'mod')).replace(/\.asar$/i, ''));
@@ -429,7 +448,8 @@ function stageAsarImport(fileName, buf) {
 		kind = newVer > oldVer ? 'upgrade' : (newVer < oldVer ? 'downgrade' : 'same');
 	}
 	const token = newImportToken();
-	pendingImports.set(token, { targetDisk: existing.disk, bytes: buf });
+	prunePendingImports();
+	pendingImports.set(token, { targetDisk: existing.disk, bytes: buf, at: Date.now() });
 	return {
 		status: 'conflict', token, kind,
 		file: existing.canonical,
@@ -444,6 +464,8 @@ function confirmPendingImport(token) {
 	try {
 		const p = pendingImports.get(token);
 		if (!p) return fail('导入会话已失效，请重新导入', 'expired');
+		// 覆盖已安装模组：游戏运行中该 asar 被锁，writeFileSync 会“写成功”但破坏运行中按偏移读取的映射（§21.5/§22）——必须先拦
+		if (isGameRunning()) return fail('游戏运行中无法覆盖已安装的模组，请先关闭游戏后重试', 'busy');
 		pendingImports.delete(token);
 		try {
 			fs.writeFileSync(path.join(pluginsDir(), p.targetDisk), p.bytes);
@@ -585,7 +607,7 @@ function getBackupsData() {
 	} catch (e) { return fail(e.message); }
 }
 
-function backupNow(taskId, finalName) {
+function backupNow(finalName) {
 	try {
 		const r = doBackup({ customName: finalName, auto: false });
 		if (r.status === 'skipped') return fail('当前没有存档可备份', 'empty');
@@ -614,27 +636,68 @@ function pruneAutoBackups(settings) {
 		if (i >= maxCount || m.mtimeMs < cutoff) toDelete.add(m.id);
 	});
 	for (const id of toDelete) {
-		try { fs.rmSync(path.join(backupsDir(), id + '.zip'), { force: true }); } catch (e) {}
-		delete meta[id];
+		// 仅删成功才移除 meta —— 占用删不掉时保留 meta，避免孤儿 zip 丢失 auto 标记后以无名备份复活并永久豁免剪枝
+		try { fs.rmSync(path.join(backupsDir(), id + '.zip'), { force: true }); delete meta[id]; } catch (e) {}
 	}
 	writeMeta(meta);
 }
 
+// 恢复存档：先把备份解压进临时目录并确认成功，再用改名原子替换正式 _storage。
+// 关键——绝不能像旧实现那样“先清空 _storage 再解压”：坏/假备份在解压时抛错就会让存档全灭且无法回滚。
 function restoreBackup(name) {
 	try {
+		if (!validBackupName(name)) return fail('无效的备份名', 'badname');
 		const zipPath = path.join(backupsDir(), name + '.zip');
 		if (!fs.existsSync(zipPath)) return fail('备份不存在', 'notfound');
-		ensureDir(storageDir());
-		for (const f of fs.readdirSync(storageDir())) {
-			try { fs.rmSync(path.join(storageDir(), f), { recursive: true, force: true }); } catch (e) {}
+		// 游戏运行中恢复：退出时会用内存状态回写覆盖恢复结果，且 _storage 可能被占用改名失败 —— 先拦
+		if (isGameRunning()) return fail('游戏运行中无法恢复存档，请先关闭游戏', 'busy');
+
+		// 1) 读取并校验备份（坏包在此抛错，此时 _storage 尚未被动过）
+		let entries;
+		try {
+			entries = new AdmZip(zipPath).getEntries().filter(e => !e.isDirectory);
+		} catch (e) { return fail('备份文件已损坏，无法读取', 'badzip'); }
+		if (!entries.length) return fail('备份为空，未做任何改动', 'empty');
+
+		// 2) 解压到同盘临时目录（落盘统一走本文件顶部 original-fs；防 .. 穿越）
+		const tmpDir = path.join(gameRoot(), '_storage_restore_' + Date.now());
+		try {
+			for (const e of entries) {
+				const rel = String(e.entryName).replace(/\\/g, '/').replace(/^\/+/, '');
+				if (!rel || rel.split('/').some(seg => seg === '..' || seg === '')) continue;
+				const dst = path.join(tmpDir, rel);
+				ensureDir(path.dirname(dst));
+				fs.writeFileSync(dst, e.getData());
+			}
+		} catch (e) {
+			try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e2) {}
+			return fail('解压备份失败，存档未改动: ' + e.message, 'extract');
 		}
-		new AdmZip(zipPath).extractAllTo(storageDir(), true);
+
+		// 3) 原子替换：旧 _storage 先改名保留，临时目录改名上位；任一步失败尽力回滚旧存档
+		ensureDir(storageDir());
+		const oldDir = path.join(gameRoot(), '_storage_old_' + Date.now());
+		try {
+			fs.renameSync(storageDir(), oldDir);
+		} catch (e) {
+			try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e2) {}
+			return fail('存档目录被占用，无法恢复，请关闭游戏后重试', 'busy');
+		}
+		try {
+			fs.renameSync(tmpDir, storageDir());
+		} catch (e) {
+			try { fs.renameSync(oldDir, storageDir()); } catch (e2) {}
+			try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e2) {}
+			return fail('恢复存档失败，已还原原存档: ' + e.message, 'replace');
+		}
+		try { fs.rmSync(oldDir, { recursive: true, force: true }); } catch (e) {}
 		return ok();
 	} catch (e) { return fail(e.message); }
 }
 
 function renameBackup(name, nextLabel) {
 	try {
+		if (!validBackupName(name)) return fail('无效的备份名', 'badname');
 		const meta = readMeta();
 		if (!meta[name]) meta[name] = { id: name, mtimeMs: Date.now() };
 		meta[name].customName = String(nextLabel || '').trim();
@@ -645,6 +708,7 @@ function renameBackup(name, nextLabel) {
 
 function toggleBackupLock(name) {
 	try {
+		if (!validBackupName(name)) return fail('无效的备份名', 'badname');
 		const meta = readMeta();
 		if (!meta[name]) meta[name] = { id: name, mtimeMs: Date.now() };
 		meta[name].locked = !meta[name].locked;
@@ -655,9 +719,13 @@ function toggleBackupLock(name) {
 
 function deleteBackup(name) {
 	try {
+		if (!validBackupName(name)) return fail('无效的备份名', 'badname');
 		const meta = readMeta();
 		if (meta[name] && meta[name].locked) return fail('备份已锁定，无法删除', 'locked');
-		try { fs.rmSync(path.join(backupsDir(), name + '.zip'), { force: true }); } catch (e) {}
+		const zp = path.join(backupsDir(), name + '.zip');
+		// 删不掉（被占用）就如实报错，不能吞掉后照删 meta —— 否则孤儿 zip 会以无名备份复活且丢失锁定/名称
+		try { fs.rmSync(zp, { force: true }); } catch (e) { return fail('删除失败，文件可能被占用', 'busy'); }
+		if (fs.existsSync(zp)) return fail('删除失败，文件可能被占用', 'busy');
 		delete meta[name];
 		writeMeta(meta);
 		return ok();
@@ -666,6 +734,7 @@ function deleteBackup(name) {
 
 async function exportBackupFile(name) {
 	try {
+		if (!validBackupName(name)) return fail('无效的备份名', 'badname');
 		const zipPath = path.join(backupsDir(), name + '.zip');
 		if (!fs.existsSync(zipPath)) return fail('备份不存在', 'notfound');
 		const res = await D.dialog.showSaveDialog(D.getDialogParent ? D.getDialogParent() : null, {
@@ -755,30 +824,26 @@ function updateOverride() {
 	return null;
 }
 
-// 拉 release 列表并整理成 pickUpdateTarget 的输入（含 Beta/prerelease；draft 匿名 API 拿不到无需过滤）
-async function fetchReleases(repo, signal) {
-	const o = updateOverride();
-	const url = (o && o.releasesUrl) ? String(o.releasesUrl) : `https://api.github.com/repos/${repo}/releases?per_page=30`;
-	const resp = await fetch(url, { headers: ghHeaders(), signal });
-	if (resp.status === 404) return { status: 404, releases: [] };
-	if (!resp.ok) return { status: resp.status, releases: null };
-	const list = await resp.json();
-	const releases = (Array.isArray(list) ? list : []).map(r => ({
-		tag: String(r.tag_name || r.name || ''),
-		url: r.html_url || ('https://github.com/' + repo + '/releases'),
-		notes: r.body || '',
-		publishedAt: r.published_at || '',
-		assets: (r.assets || []).map(a => ({ name: String(a.name || ''), url: String(a.browser_download_url || ''), size: Number(a.size) || 0 }))
-	}));
-	return { status: 200, releases };
-}
-
-function updateAssetsOf(target) {
-	const assets = (target && target.assets) || [];
-	return {
-		zip: assets.find(a => a.name === 'update.zip') || null,
-		manifest: assets.find(a => a.name === 'update.json') || null
-	};
+// 统一流式下载：带 AbortSignal 与进度回调 onProgress({received,total})，返回完整 Buffer。
+// 替代原先在自动更新/安装器/工坊 3 处各写一份的 getReader() 循环。!resp.ok 抛带 httpStatus 的错误，AbortError 原样上抛。
+async function streamDownload(url, { signal, onProgress } = {}) {
+	const resp = await fetch(url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal });
+	if (!resp.ok) { const e = new Error('HTTP ' + resp.status); e.httpStatus = resp.status; throw e; }
+	const total = Number(resp.headers.get('content-length')) || 0;
+	if (resp.body && resp.body.getReader) {
+		const reader = resp.body.getReader();
+		const chunks = [];
+		let received = 0;
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(Buffer.from(value));
+			received += value.length;
+			if (onProgress) onProgress({ received, total });
+		}
+		return Buffer.concat(chunks);
+	}
+	return Buffer.from(new Uint8Array(await resp.arrayBuffer()));
 }
 
 // 版本检查数据源 = 仓库 main 分支的 latest.json（raw.githubusercontent，走 CDN 不受 API 60次/小时限额）
@@ -861,24 +926,22 @@ async function downloadAndApplyUpdate(sender, betaEnabled) {
 		const t = r.target;
 		if (!t.updateZip || !t.updateJson) return fail('该版本未提供自动更新包', 'noAsset');
 
-		const manifest = await (await fetch(t.updateJson, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal })).json();
+		const mresp = await fetch(t.updateJson, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
+		if (!mresp.ok) return fail('获取更新清单失败 (HTTP ' + mresp.status + ')', 'http');
+		const manifest = await mresp.json();
 		const wantSha = String((manifest && manifest.sha256) || '').toLowerCase();
 
 		send({ phase: 'download', pct: 0, text: '正在下载更新包...' });
-		const zresp = await fetch(t.updateZip, { signal: ctrl.signal });
-		if (!zresp.ok || !zresp.body) return fail('下载失败 (HTTP ' + zresp.status + ')', 'download');
-		const total = Number(zresp.headers.get('content-length')) || 0;
-		const reader = zresp.body.getReader();
-		const chunks = [];
-		let received = 0;
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			chunks.push(Buffer.from(value));
-			received += value.length;
-			send({ phase: 'download', pct: total ? Math.min(99, Math.round(received / total * 100)) : null, received, total, text: '正在下载更新包...' });
+		let buf;
+		try {
+			buf = await streamDownload(t.updateZip, {
+				signal: ctrl.signal,
+				onProgress: ({ received, total }) => send({ phase: 'download', pct: total ? Math.min(99, Math.round(received / total * 100)) : null, received, total, text: '正在下载更新包...' })
+			});
+		} catch (e) {
+			if (e.name === 'AbortError') throw e;
+			return fail('下载失败' + (e.httpStatus ? ' (HTTP ' + e.httpStatus + ')' : ''), 'download');
 		}
-		const buf = Buffer.concat(chunks);
 
 		send({ phase: 'verify', pct: 99, text: '正在校验完整性...' });
 		const got = require('crypto').createHash('sha256').update(buf).digest('hex');
@@ -971,20 +1034,22 @@ async function downloadAndRunInstaller(sender, betaEnabled) {
 		if (!r.target.installer) return fail('该版本未提供安装器 exe', 'noexe');
 
 		send({ phase: 'download', pct: 0, text: '正在下载安装器...' });
-		const resp = await fetch(r.target.installer, { signal: ctrl.signal });
-		if (!resp.ok || !resp.body) return fail('下载失败 (HTTP ' + resp.status + ')', 'download');
-		const total = Number(resp.headers.get('content-length')) || 0;
-		const reader = resp.body.getReader();
-		const chunks = [];
-		let received = 0;
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			chunks.push(Buffer.from(value));
-			received += value.length;
-			send({ phase: 'download', pct: total ? Math.min(99, Math.round(received / total * 100)) : null, received, total, text: '正在下载安装器...' });
+		let buf;
+		try {
+			buf = await streamDownload(r.target.installer, {
+				signal: ctrl.signal,
+				onProgress: ({ received, total }) => send({ phase: 'download', pct: total ? Math.min(99, Math.round(received / total * 100)) : null, received, total, text: '正在下载安装器...' })
+			});
+		} catch (e) {
+			if (e.name === 'AbortError') throw e;
+			return fail('下载失败' + (e.httpStatus ? ' (HTTP ' + e.httpStatus + ')' : ''), 'download');
 		}
-		const buf = Buffer.concat(chunks);
+		// 可执行文件更该校验：latest.json 若提供 installerSha256 则比对（未提供时向前兼容跳过）
+		const wantExeSha = String((r.target && r.target.installerSha256) || '').toLowerCase();
+		if (wantExeSha) {
+			const gotExe = require('crypto').createHash('sha256').update(buf).digest('hex');
+			if (gotExe !== wantExeSha) return fail('安装器校验失败 (sha256 不匹配)', 'sha256');
+		}
 
 		const os = require('os');
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dcml_up_'));
@@ -1017,15 +1082,19 @@ async function fetchModManifest(repo, signal) {
 		const resp = await fetch(url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal, cache: 'no-store' });
 		if (!resp.ok) return null;
 		return await resp.json();
-	} catch (e) { return null; }
+	} catch (e) {
+		if (e && e.name === 'AbortError') throw e;  // 让上层区分“超时”与“无清单/网络错误”，不再把超时误报成清单缺失
+		return null;
+	}
 }
 
 // 检测单模组远端版本 → status: noChannel/unknown/outdated/current/ahead
-async function checkModUpdate(idx) {
+async function checkModUpdate(idx, expectName) {
 	try {
 		const mods = effectiveMods();
 		const mod = mods[idx];
 		if (!mod) return fail('模组不存在', 'notfound');
+		if (idMismatch(mod, expectName)) return fail('模组列表已变化，请刷新后重试', 'stale');
 		const meta = readModMeta(mod.diskName);
 		const upd = meta && meta.update;
 		if (!upd || upd.source !== 'github' || !upd.repo) return ok({ status: 'noChannel' });
@@ -1048,31 +1117,51 @@ async function checkModUpdate(idx) {
 }
 
 // 执行模组更新：下载远端 .asar → 复用导入管线覆盖（保留前缀/启停/config 不丢）
-async function updateMod(idx) {
+async function updateMod(sender, idx, expectName) {
+	const send = (p) => { try { if (sender && !sender.isDestroyed()) sender.send('mgr:updateModProgress', p); } catch (e) {} };
 	try {
 		const mods = effectiveMods();
 		const mod = mods[idx];
 		if (!mod) return fail('模组不存在', 'notfound');
+		if (idMismatch(mod, expectName)) return fail('模组列表已变化，请刷新后重试', 'stale');
+		if (isGameRunning()) return fail('游戏运行中无法更新模组，请先关闭游戏', 'running');
 		const meta = readModMeta(mod.diskName);
 		const upd = meta && meta.update;
 		if (!upd || upd.source !== 'github' || !upd.repo) return fail('该模组无更新渠道', 'noChannel');
+		const label = mod.displayName || mod.bareName || mod.name;
 		const ctrl = new AbortController();
 		const timer = setTimeout(() => ctrl.abort(), 60000);
 		try {
+			send({ phase: 'meta', name: label });
 			const m = await fetchModManifest(upd.repo, ctrl.signal);
-			if (!m || !m.tag || !m.asset) return fail('远端版本清单缺失或格式不正确');
+			if (!m || !m.tag || !m.asset) { send({ phase: 'done' }); return fail('远端版本清单缺失或格式不正确'); }
 			const url = `https://github.com/${upd.repo}/releases/download/${m.tag}/${m.asset}`;
-			const dl = await fetch(url, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
-			if (!dl.ok) return fail(`下载失败 (HTTP ${dl.status})`);
-			const buf = Buffer.from(new Uint8Array(await dl.arrayBuffer()));
+			let buf;
+			try {
+				let lastPct = -1;
+				buf = await streamDownload(url, {
+					signal: ctrl.signal,
+					onProgress: ({ received, total }) => {
+						const pct = total ? Math.min(99, Math.round(received / total * 100)) : null;
+						if (pct !== lastPct) { lastPct = pct; send({ phase: 'download', pct, received, total, name: label, tag: m.tag }); }
+					}
+				});
+			} catch (e) {
+				send({ phase: 'done' });
+				if (e.name === 'AbortError') throw e;
+				return fail(`下载失败${e.httpStatus ? ` (HTTP ${e.httpStatus})` : ''}`);
+			}
+			send({ phase: 'install', pct: 99 });
 			const r = stageAsarImport(m.asset, buf);
-			if (r.status === 'invalid') return fail(r.message || '下载的模组文件无效');
-			if (r.status === 'added') return ok({ updated: true, restartRequired: true, note: '已作为新模组安装' });
+			if (r.status === 'invalid') { send({ phase: 'done' }); return fail(r.message || '下载的模组文件无效'); }
+			if (r.status === 'added') { send({ phase: 'done', pct: 100 }); return ok({ updated: true, restartRequired: true, note: '已作为新模组安装' }); }
 			const c = confirmPendingImport(r.token);
+			send({ phase: 'done', pct: 100 });
 			if (!c.ok) return c;
 			return ok({ updated: true, restartRequired: true, kind: r.kind });
 		} finally { clearTimeout(timer); }
 	} catch (e) {
+		send({ phase: 'done' });
 		if (e.name === 'AbortError') return fail('更新超时', 'timeout');
 		return fail(e.message);
 	}
@@ -1090,7 +1179,7 @@ function storeSourceUrl() {
 // 查单个收录模组的云端最新版本（走 raw mod.update.json，不受 API 限额）
 async function fetchStoreRemote(repo, signal) {
 	const m = await fetchModManifest(repo, signal);
-	if (!m) return { state: 'noManifest' };
+	if (!m) return { state: 'noRelease' };
 	const ver = (typeof m.version === 'number') ? m.version : null;
 	return { state: 'ok', ver, display: m.displayVersion || m.tag || null, tag: m.tag || null };
 }
@@ -1158,29 +1247,20 @@ async function storeInstallRelease(sender, repo, tag) {
 		if (!useTag) { send({ phase: 'done' }); return fail('无法确定版本标签'); }
 		const assetName = m.asset;
 		const dlUrl = `https://github.com/${repo}/releases/download/${useTag}/${assetName}`;
-		const dl = await fetch(dlUrl, { headers: { 'User-Agent': 'DevilConnection-ModLoader' }, signal: ctrl.signal });
-		if (!dl.ok) { send({ phase: 'done' }); return fail(`下载失败 (HTTP ${dl.status})`); }
-		const total = Number(dl.headers.get('content-length')) || 0;
 		let buf;
-		if (dl.body && dl.body.getReader) {
-			const reader = dl.body.getReader();
-			const chunks = [];
-			let received = 0;
+		try {
 			let lastPct = -1;
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				chunks.push(Buffer.from(value));
-				received += value.length;
-				const pct = total ? Math.min(99, Math.round(received / total * 100)) : null;
-				if (pct !== lastPct) {
-					lastPct = pct;
-					send({ phase: 'download', pct, received, total, name: assetName, tag: useTag });
+			buf = await streamDownload(dlUrl, {
+				signal: ctrl.signal,
+				onProgress: ({ received, total }) => {
+					const pct = total ? Math.min(99, Math.round(received / total * 100)) : null;
+					if (pct !== lastPct) { lastPct = pct; send({ phase: 'download', pct, received, total, name: assetName, tag: useTag }); }
 				}
-			}
-			buf = Buffer.concat(chunks);
-		} else {
-			buf = Buffer.from(new Uint8Array(await dl.arrayBuffer()));
+			});
+		} catch (e) {
+			send({ phase: 'done' });
+			if (e.name === 'AbortError') throw e;
+			return fail(`下载失败${e.httpStatus ? ` (HTTP ${e.httpStatus})` : ''}`);
 		}
 		send({ phase: 'install', pct: 99, text: '正在安装...' });
 		const r = stageAsarImport(assetName, buf);
@@ -1229,15 +1309,15 @@ function setup(deps) {
 	const H = {
 		'mgr:getModsData': () => getModsData(),
 		'mgr:isGameRunning': () => ok(isGameRunning()),
-		'mgr:toggleModDisabled': (e, idx) => toggleModDisabled(idx),
-		'mgr:deleteMod': (e, idx) => deleteMod(idx),
+		'mgr:toggleModDisabled': (e, idx, name) => toggleModDisabled(idx, name),
+		'mgr:deleteMod': (e, idx, name) => deleteMod(idx, name),
 		'mgr:moveModTo': (e, o, n) => moveModTo(o, n),
 		'mgr:autoFixOrder': () => autoFixOrder(),
 		'mgr:importModFromBuffer': (e, fn, bytes) => importModFromBuffer(fn, bytes),
 		'mgr:confirmPendingImport': (e, token) => confirmPendingImport(token),
 		'mgr:cancelPendingImport': (e, token) => cancelPendingImport(token),
-		'mgr:getModConfig': (e, idx) => getModConfig(idx),
-		'mgr:saveModConfig': (e, idx, values) => saveModConfig(idx, values),
+		'mgr:getModConfig': (e, idx, name) => getModConfig(idx, name),
+		'mgr:saveModConfig': (e, idx, name, values) => saveModConfig(idx, name, values),
 		'mgr:openModsFolder': () => openModsFolder(),
 		'mgr:openExternal': (e, url) => openExternal(url),
 		'mgr:getAppInfo': () => getAppInfo(),
@@ -1245,8 +1325,8 @@ function setup(deps) {
 		'mgr:downloadAndApplyUpdate': (e, beta) => downloadAndApplyUpdate(e.sender, !!beta),
 		'mgr:downloadAndRunInstaller': (e, beta) => downloadAndRunInstaller(e.sender, !!beta),
 		'mgr:cancelUpdate': () => cancelUpdate(),
-		'mgr:checkModUpdate': (e, idx) => checkModUpdate(idx),
-		'mgr:updateMod': (e, idx) => updateMod(idx),
+		'mgr:checkModUpdate': (e, idx, name) => checkModUpdate(idx, name),
+		'mgr:updateMod': (e, idx, name) => updateMod(e.sender, idx, name),
 		'mgr:getStoreList': () => getStoreList(),
 		'mgr:storeInstall': (e, repo, tag) => storeInstallRelease(e.sender, String(repo || ''), tag ? String(tag) : null),
 		'mgr:storeHistory': (e, repo) => storeHistory(String(repo || '')),
@@ -1258,7 +1338,7 @@ function setup(deps) {
 		'mgr:toggleBackupLock': (e, name) => toggleBackupLock(name),
 		'mgr:exportBackupFile': (e, name) => exportBackupFile(name),
 		'mgr:deleteBackup': (e, name) => deleteBackup(name),
-		'mgr:backupNow': (e, taskId, finalName) => backupNow(taskId, finalName),
+		'mgr:backupNow': (e, finalName) => backupNow(finalName),
 		'mgr:importBackupFromBuffer': (e, fn, bytes) => importBackupFromBuffer(fn, bytes),
 		'mgr:exportCurrentSave': () => exportCurrentSave()
 	};

@@ -2,7 +2,7 @@ export function createModal() {
 	const modalWrap = document.getElementById('modal-container');
 	const dialogBox = document.getElementById('confirm-dialog');
 
-	function askConfirm({
+	function showConfirm({
 		title,
 		message,
 		hasInput = false,
@@ -40,6 +40,15 @@ export function createModal() {
 			document.getElementById('confirm-ok').onclick = () => cleanup(hasInput ? input.value : true);
 			document.getElementById('confirm-cancel').onclick = () => cleanup(null);
 		});
+	}
+
+	// 串行化：并发流程各自弹确认框时排队执行，避免后者覆盖前者的按钮 handler 导致前一个 Promise 永不 resolve、调用方永久悬挂
+	let chain = Promise.resolve();
+	function askConfirm(opts) {
+		const run = () => showConfirm(opts);
+		const p = chain.then(run, run);
+		chain = p.catch(() => {});
+		return p;
 	}
 
 	return { askConfirm };

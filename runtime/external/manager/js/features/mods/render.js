@@ -1,3 +1,5 @@
+import { escapeHtml } from '../../core/utils.js';
+
 export function renderAsarInstalledCard(sizeText) {
 	return `
 <div class="card flex items-center justify-between px-6 py-4 bg-white">
@@ -35,10 +37,8 @@ export function renderEmptyMods() {
 }
 
 export function renderModsLoadError(message) {
-	return `<div class="p-6 text-rose-500 text-center text-xs">无法加载模组: ${message}</div>`;
+	return `<div class="p-6 text-rose-500 text-center text-xs">无法加载模组: ${escapeHtml(message)}</div>`;
 }
-
-import { escapeHtml } from '../../core/utils.js';
 
 const NO_META_WARN = '此模组未尝试兼容本加载器!可能会有异常表现!';
 
