@@ -9,14 +9,14 @@
 		"runtimeZip": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/RV1.2.8/runtime.zip"
 	},
 	"beta": {
-		"version": "1.2.9-3CB3E5D83D",
+		"version": "1.2.9-3CB3F48179",
 		"beta": true,
 		"shellVersion": 4,
-		"tag": "BRV1.2.9-3CB3E5D83D",
+		"tag": "BRV1.2.9-3CB3F48179",
 		"notes": "修复了很多重大错误",
-		"installer": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.9-3CB3E5D83D/DevilConnectionModLoaderInstaller.exe",
-		"runtimeZip": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.9-3CB3E5D83D/runtime.zip",
-		"updateZip": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.9-3CB3E5D83D/update.zip",
-		"updateJson": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.9-3CB3E5D83D/update.json"
+		"installer": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.9-3CB3F48179/DevilConnectionModLoaderInstaller.exe",
+		"runtimeZip": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.9-3CB3F48179/runtime.zip",
+		"updateZip": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.9-3CB3F48179/update.zip",
+		"updateJson": "https://github.com/Luoyu-Wangchai/DevilConnection_ModLoader/releases/download/BRV1.2.9-3CB3F48179/update.json"
 	}
 }
